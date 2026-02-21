@@ -73,8 +73,13 @@ async function runScan() {
         edge: 0,
         direction: null,
         kellyFraction: 0,
+        effectiveProb: lite.probability,
         betAmount: 0,
         action: "SKIP_ERROR",
+        liquidity: lite.totalLiquidity,
+        closeTime: new Date(lite.closeTime).toISOString(),
+        uniqueBettorCount: lite.uniqueBettorCount ?? 0,
+        description: "",
       });
     }
   }

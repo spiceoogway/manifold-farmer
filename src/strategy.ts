@@ -83,12 +83,11 @@ export function kellyFraction(
 }
 
 /**
- * Size a bet using fractional Kelly with position and liquidity limits.
+ * Size a bet using fractional Kelly with position limits.
  */
 export function sizeBet(
   fullKelly: number,
   bankroll: number,
-  liquidity: number,
   config: Config
 ): number {
   // Apply Kelly fraction (e.g., 1/4 Kelly)
@@ -100,12 +99,52 @@ export function sizeBet(
   // Cap at max bet amount
   bet = Math.min(bet, config.maxBetAmount);
 
-  // Cap at percentage of pool liquidity to limit price impact
-  // Price impact ≈ bet / (2 * liquidity), so cap bet at maxImpactPct * 2 * liquidity
-  bet = Math.min(bet, config.maxImpactPct * 2 * liquidity);
-
   // Floor at 1 mana (minimum bet)
   return Math.max(0, Math.round(bet));
+}
+
+/**
+ * Iteratively solve for optimal bet size accounting for AMM slippage.
+ *
+ * Slippage worsens our effective fill price, reducing edge and Kelly fraction.
+ * We iterate: guess bet size → compute slippage-adjusted price → recompute Kelly
+ * → re-size → converge in ~5 iterations.
+ *
+ * Price impact approximation for CPMM: buying amount A shifts the effective
+ * average fill price by ~A / (4 * liquidity) against us.
+ */
+export function sizeBetWithSlippage(
+  estimate: number,
+  marketProb: number,
+  direction: "YES" | "NO",
+  bankroll: number,
+  liquidity: number,
+  config: Config
+): { betAmount: number; kellyFrac: number; effectiveProb: number } {
+  let bet = 0;
+  let fKelly = 0;
+  let adjProb = marketProb;
+
+  for (let i = 0; i < 8; i++) {
+    // Adjust market prob for slippage: buying pushes price against us
+    const slippage = bet / (4 * liquidity);
+    if (direction === "YES") {
+      adjProb = Math.min(0.99, marketProb + slippage);
+    } else {
+      adjProb = Math.max(0.01, marketProb - slippage);
+    }
+
+    // Recompute Kelly at the slippage-adjusted price
+    fKelly = kellyFraction(estimate, adjProb, direction);
+    if (fKelly <= 0) return { betAmount: 0, kellyFrac: 0, effectiveProb: adjProb };
+
+    // Size with standard constraints
+    const newBet = sizeBet(fKelly, bankroll, config);
+    if (Math.abs(newBet - bet) < 1) break; // converged
+    bet = newBet;
+  }
+
+  return { betAmount: bet, kellyFrac: fKelly, effectiveProb: adjProb };
 }
 
 /**
@@ -119,7 +158,13 @@ export function makeDecision(
 ): TradeDecision {
   const edge = calculateEdge(estimate.probability, market.probability);
   const traceId = randomUUID();
-  const base: Omit<TradeDecision, "action" | "direction" | "kellyFraction" | "betAmount"> = {
+
+  // Extract text description for logging
+  let desc = "";
+  if (market.textDescription) desc = market.textDescription;
+  else if (typeof market.description === "string") desc = market.description;
+
+  const base: Omit<TradeDecision, "action" | "direction" | "kellyFraction" | "effectiveProb" | "betAmount"> = {
     traceId,
     timestamp: new Date().toISOString(),
     marketId: market.id,
@@ -130,6 +175,10 @@ export function makeDecision(
     confidence: estimate.confidence,
     reasoning: estimate.reasoning,
     edge,
+    liquidity: market.totalLiquidity,
+    closeTime: new Date(market.closeTime).toISOString(),
+    uniqueBettorCount: market.uniqueBettorCount ?? 0,
+    description: desc.slice(0, 2000),
   };
 
   if (edge < config.edgeThreshold) {
@@ -137,31 +186,39 @@ export function makeDecision(
       ...base,
       direction: null,
       kellyFraction: 0,
+      effectiveProb: market.probability,
       betAmount: 0,
       action: "SKIP_LOW_EDGE",
     };
   }
 
   const direction = getDirection(estimate.probability, market.probability);
-  const fKelly = kellyFraction(estimate.probability, market.probability, direction);
+  const { betAmount, kellyFrac, effectiveProb } = sizeBetWithSlippage(
+    estimate.probability,
+    market.probability,
+    direction,
+    bankroll,
+    market.totalLiquidity,
+    config
+  );
 
-  if (fKelly <= 0) {
+  if (kellyFrac <= 0) {
     return {
       ...base,
       direction,
-      kellyFraction: fKelly,
+      kellyFraction: kellyFrac,
+      effectiveProb,
       betAmount: 0,
       action: "SKIP_NEGATIVE_KELLY",
     };
   }
 
-  const betAmount = sizeBet(fKelly, bankroll, market.totalLiquidity, config);
-
   if (betAmount < 1) {
     return {
       ...base,
       direction,
-      kellyFraction: fKelly,
+      kellyFraction: kellyFrac,
+      effectiveProb,
       betAmount: 0,
       action: "SKIP_LOW_EDGE",
     };
@@ -170,7 +227,8 @@ export function makeDecision(
   return {
     ...base,
     direction,
-    kellyFraction: fKelly,
+    kellyFraction: kellyFrac,
+    effectiveProb,
     betAmount,
     action: "BET",
   };

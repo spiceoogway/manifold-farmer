@@ -40,7 +40,6 @@ export function loadConfig(): Config {
     maxBetAmount: envInt("MAX_BET_AMOUNT", 50),
     minLiquidity: envInt("MIN_LIQUIDITY", 100),
     maxMarketsPerRun: envInt("MAX_MARKETS_PER_RUN", 20),
-    maxImpactPct: envFloat("MAX_IMPACT_PCT", 0.02),
     claudeModel: process.env.CLAUDE_MODEL || "claude-sonnet-4-20250514",
   };
 }

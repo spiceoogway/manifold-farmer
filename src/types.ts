@@ -8,7 +8,6 @@ export interface Config {
   maxBetAmount: number;
   minLiquidity: number;
   maxMarketsPerRun: number;
-  maxImpactPct: number;
   claudeModel: string;
 }
 
@@ -58,8 +57,14 @@ export interface TradeDecision {
   edge: number;
   direction: "YES" | "NO" | null;
   kellyFraction: number;
+  effectiveProb: number;
   betAmount: number;
   action: "BET" | "SKIP_LOW_EDGE" | "SKIP_NEGATIVE_KELLY" | "SKIP_ERROR";
+  // Market context at decision time
+  liquidity: number;
+  closeTime: string;
+  uniqueBettorCount: number;
+  description: string;
 }
 
 export interface TradeExecution {

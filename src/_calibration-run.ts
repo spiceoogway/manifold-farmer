@@ -5,222 +5,188 @@ import { executeBets } from "./executor.js";
 import { logDecision, logInfo, logError } from "./logger.js";
 import type { ClaudeEstimate, TradeDecision } from "./types.js";
 
-// Claude Code's estimates — formed independently without seeing market prices
-// (I did see them during survey, but estimates are based on fundamentals)
+// Claude Code's estimates — updated 2026-02-21 after 12h price movements
 const estimates: Record<string, ClaudeEstimate> = {
-  // === HUGE EDGE candidates ===
+  // === HIGH EDGE ===
 
-  UgQuzSqAtg: {
-    probability: 0.97,
-    confidence: "high",
-    reasoning:
-      "USGS data: ~1500 M5+ earthquakes/year globally = ~4.1/day. Poisson P(X≥1) with λ=4 is 1 - e^(-4) ≈ 98.2%. Automated resolution with real-world data. Nearly certain unless data source is regional.",
-  },
-
-  tUStPOynIU: {
-    probability: 0.05,
+  // ICE Olympics incident: market spiked 10%→53%. Unless a real incident occurred,
+  // this seems like overreaction. Olympics end tomorrow. ICE agents are there for
+  // security, not enforcement. DHS explicitly said no enforcement abroad.
+  zpzy6p59nR: {
+    probability: 0.15,
     confidence: "medium",
     reasoning:
-      "Requires a former president to die within days AND Biden to attend. No former president appears imminently terminal. Biden is 83 but the question is about HIM attending, not dying. Very unlikely in 7-day window.",
+      "Market spiked from 10% to 53% — possibly reacting to news. But ICE agents at Olympics are security support, not enforcement. DHS explicitly stated no immigration enforcement abroad. Even if some minor friction occurred, a 'significant event with substantial media coverage' per resolution criteria is a high bar. Olympics end Feb 22.",
   },
 
-  // === MODERATE EDGE candidates ===
-
-  "5lQIsyOLgS": {
-    probability: 0.30,
-    confidence: "low",
-    reasoning:
-      "Microsoft published Majorana 1 results in Nature (peer-reviewed). However, scientific community remains deeply skeptical about whether these are true topological qubits. The Nature publication gives weight, but independent verification hasn't confirmed the claim. Resolution criteria favor YES given the publication exists.",
-  },
-
-  S6ItCSyttE: {
-    probability: 0.05,
+  // Nvidia >$65B crashed from 91%→51% while >$67B rose to 74%.
+  // This is inconsistent: if P(>$67B)=74%, then P(>$65B) must be ≥74%.
+  // Clear mispricing.
+  LNPQz0OlUI: {
+    probability: 0.80,
     confidence: "medium",
     reasoning:
-      "Trump administration has consistently defended ICE agents. Historically, federal agents face consequences in <5% of shooting cases. 2.7 days remaining makes any action extremely unlikely. Paid leave excluded from resolution.",
+      "Nvidia >$65B at 51% is inconsistent with the >$67B market at 74%. If there's ≥74% chance revenue exceeds $67B, there's at least 74% chance it exceeds $65B. This is a logical arbitrage. Nvidia has consistently beaten estimates. 80% is conservative given the other market's pricing.",
   },
 
-  uZpnqOOLps: {
-    probability: 0.30,
-    confidence: "low",
-    reasoning:
-      "Self-referential viral market on niche platform. Famous people rarely engage with Manifold. High liquidity but identity verification adds friction. 8 days left. Base rate for celebrity participation very low.",
-  },
-
+  // Raptors/Bucks: market moved from 59%→66% for Raptors. I still lean Bucks.
   u8pCzd6ZOc: {
     probability: 0.42,
     confidence: "low",
     reasoning:
-      "Raptors have been a rebuilding team in recent years while Bucks remain contenders with Giannis. 59% for Raptors seems elevated unless major roster changes occurred. Lean toward Bucks.",
+      "Raptors have been rebuilding while Bucks remain contenders with Giannis. 66% for Raptors is even more elevated than before. Edge widened. Lean toward Bucks unless Giannis is injured/resting.",
   },
 
-  "d2Rc2Cd9gt": {
-    probability: 0.02,
-    confidence: "high",
-    reasoning:
-      "Requires ALL FOUR of Gemini, Claude, GPT, and Grok to release new models in a single week. Each independently unlikely to release in any given week. Conjunction of all four is extremely improbable.",
-  },
-
-  EzOnELn2Ol: {
-    probability: 0.40,
+  // Celtics/Lakers: market dropped from 56%→52%. Celtics still favored in my view.
+  LEALz8zsZO: {
+    probability: 0.62,
     confidence: "low",
     reasoning:
-      "Ukraine historically wins 1-2 medals at winter Olympics (1 gold at both 2018 and 2022). Strong in biathlon and freestyle skiing. Olympics nearly over (ends Feb 22). 31% seems slightly low given historical base rate, but late-Olympics timing may mean opportunities are limited.",
+      "Celtics have been dominant in the Tatum era. Even on the road vs Lakers, their overall talent and depth should make them slight favorites. Market at 52% undervalues them.",
   },
 
-  IgsppSzZ8O: {
-    probability: 0.78,
+  // Biden attends funeral: still at 21%. No former president is dying imminently.
+  tUStPOynIU: {
+    probability: 0.05,
     confidence: "medium",
     reasoning:
-      "Democrats have consistently created scenes at recent SOTUs. Al Green yelled last year. Political climate is highly polarized. Multiple Democrats likely to make some kind of statement. Broad resolution criteria ('does not sit quietly').",
+      "Requires a former president to die within ~6 days AND Biden to attend. No former president appears imminently terminal. Extremely unlikely.",
   },
 
+  // Famous person bet: still ~47%.
+  uZpnqOOLps: {
+    probability: 0.30,
+    confidence: "low",
+    reasoning:
+      "Self-referential viral market on niche platform. Famous people rarely engage with Manifold. High liquidity but identity verification adds friction. 7 days left.",
+  },
+
+  // Microsoft Majorana: still 19%.
+  "5lQIsyOLgS": {
+    probability: 0.30,
+    confidence: "low",
+    reasoning:
+      "Microsoft published in Nature (peer-reviewed). Scientific community skeptical but resolution criteria say 'peer-reviewed research or verifiable technical documentation.' Nature publication exists. Lean YES.",
+  },
+
+  // ICE consequences: dropped from 13%→8%. Closer to my estimate.
+  S6ItCSyttE: {
+    probability: 0.04,
+    confidence: "medium",
+    reasoning:
+      "Trump admin consistently defends ICE. Federal agents face consequences in <5% of shootings historically. Only 2 days left on market. Paid leave excluded. Very unlikely.",
+  },
+
+  // Al Green scene at SOTU: still 14%.
   NdntyEh6Zl: {
     probability: 0.25,
     confidence: "low",
     reasoning:
-      "Al Green made a scene last year. He has a history of protest. But it's not guaranteed — he may choose differently this year. ~25% accounts for his propensity while acknowledging uncertainty.",
+      "Al Green made a scene last year. He has a pattern. But not guaranteed — ~25% reflects his propensity while acknowledging he might not.",
   },
 
-  sgzpU5tCRN: {
-    probability: 0.02,
-    confidence: "high",
+  // Democrat SOTU distraction: 70%.
+  IgsppSzZ8O: {
+    probability: 0.78,
+    confidence: "medium",
     reasoning:
-      "DHS explicitly stated ICE does not conduct immigration enforcement in foreign countries. Doing so in Italy during Olympics would be a major diplomatic incident. Essentially impossible without authorization from Italian government.",
+      "Democrats have consistently created scenes at recent SOTUs. Broad criteria ('does not sit quietly'). Very likely at least one Democrat makes a statement.",
   },
 
-  s92PSpZlus: {
-    probability: 0.005,
-    confidence: "high",
-    reasoning:
-      "Military invasion of Greenland (Danish territory, NATO ally) in 7 days is essentially impossible. Would require Congressional authorization, massive military mobilization, and would trigger NATO Article 5. Trump's rhetoric ≠ military action.",
-  },
-
-  zLn2tpCZRu: {
-    probability: 0.02,
-    confidence: "high",
-    reasoning:
-      "International agreements take months/years of negotiation. Talks are just starting. US-Iran nuclear deal took 2+ years. A signed agreement in 7 days is virtually impossible even with good faith on both sides.",
-  },
-
-  // === SMALL EDGE candidates ===
-
+  // Gold above $5000: still 73%.
   CczuqztSnL: {
     probability: 0.62,
     confidence: "medium",
     reasoning:
-      "Gold hit $5,608 in Jan 2026 then dropped to $4,887. Currently near $5,000. High volatility. The recent decline suggests profit-taking pressure. 62% reflects that gold is near the threshold but the downward momentum creates risk.",
+      "Gold hit $5,608 in late Jan then fell to $4,887. High volatility. 62% reflects proximity to threshold but downward momentum creates risk. 73% seems overconfident.",
   },
 
-  RtpP6gRuy0: {
-    probability: 0.02,
-    confidence: "high",
-    reasoning:
-      "3 days to open-source Grok 3. xAI has shown no signals of imminent open-weight release. Musk's promises on open-sourcing have consistently been delayed. Very unlikely.",
-  },
-
-  zpzy6p59nR: {
-    probability: 0.06,
-    confidence: "medium",
-    reasoning:
-      "Olympics end Feb 22. ICE agents present for security but causing a notable incident in a foreign country with massive media scrutiny is unlikely. Any incident would be enormous news. 10% seems slightly high.",
-  },
-
-  "66SgPntg8g": {
-    probability: 0.003,
-    confidence: "high",
-    reasoning: "Trump has never used the N-word publicly in his political career. Doing so at the SOTU with full media coverage is essentially impossible. Even a hot mic moment is astronomically unlikely.",
-  },
-
-  NNP968EZII: {
-    probability: 0.002,
-    confidence: "high",
-    reasoning: "Russia invading NATO members Finland/Norway would trigger Article 5 and a potential nuclear war. Russia is already stretched thin in Ukraine. Essentially impossible.",
-  },
-
-  "6Ndqlu0g2z": {
-    probability: 0.005,
-    confidence: "high",
-    reasoning: "Trump pardoning someone who killed a healthcare CEO would be politically toxic. Mangione is charged in federal court. No political upside for Trump. Essentially impossible.",
-  },
-
-  RdNtDiR9mBxmSSj27BLt: {
-    probability: 0.97,
-    confidence: "high",
-    reasoning: "Z-Library has survived multiple takedown attempts, domain seizures, and arrests of founders. It continues to operate via multiple mirrors and Tor. Extremely resilient infrastructure.",
-  },
-
-  zgpsAu5ts0: {
-    probability: 0.12,
+  // Andrew Tate guilty: still 60%.
+  "6Ymg3Bcox6drzU230YMa": {
+    probability: 0.50,
     confidence: "low",
     reasoning:
-      "26 immigration shootings since Jan 2025, 6 deaths (~0.5/month). 7-day window gives ~0.12 probability. Not all victims are citizens but the rate is significant. Slightly higher than market.",
+      "UK trial hasn't started — Romanian proceedings must finish first. Market extends. 60% seems slightly high given procedural barriers.",
   },
 
-  "0gy5o8mr6s": {
-    probability: 0.15,
+  // === MODERATE EDGE ===
+
+  // Nvidia >$67B: jumped from 42%→74%. Market knows something I don't.
+  // Adjust my estimate up but still below market.
+  puIO9tcgdO: {
+    probability: 0.65,
     confidence: "low",
     reasoning:
-      "SC granted presidential immunity but hush money acts were pre-presidential. Courts have been mixed. Ultimate overturn possible but not certain. Market might be slightly low given SC's broad ruling.",
+      "Market jumped from 42%→74%, suggesting leaked info or updated analyst consensus. Nvidia has consistently beaten estimates. But the jump was dramatic — some caution warranted. 65% reflects updated info while maintaining some skepticism.",
   },
 
-  // === NEAR-CONSENSUS (small or no edge, but data points) ===
-
-  RqE2zPh5zs: {
-    probability: 0.99,
-    confidence: "high",
-    reasoning: "Norway dominates winter Olympics. Near end of games, they're almost certainly leading. Essentially certain.",
-  },
-
-  qRL0gqpRL8: {
-    probability: 0.01,
-    confidence: "high",
-    reasoning: "Norway is dominant in winter Olympics gold count. Near end of games. Virtually impossible for another country to overtake.",
-  },
-
-  Egchsq6ChS: {
-    probability: 0.01,
-    confidence: "high",
-    reasoning: "China has limited winter sports depth compared to USA. Very unlikely to win more golds.",
-  },
-
-  lEtdlI0lcO: {
-    probability: 0.18,
+  // Nuggets/Warriors: market at 66%, I think slightly less.
+  UQSUhcqOq5: {
+    probability: 0.55,
     confidence: "low",
-    reasoning: "Ukraine has biathlon and freestyle skiing talent. 'Win a race' = gold medal. Small number of events left. Slight lean above market.",
+    reasoning:
+      "Nuggets favored but 66% seems elevated. Without injury info, lean slightly toward regression. Jokic is dominant but Warriors can compete.",
   },
 
-  U6hpSdEyzl: {
-    probability: 0.02,
-    confidence: "medium",
-    reasoning: "Even in current political climate, administration attacking victim's family members publicly would be extraordinary. 2% seems fair.",
-  },
-
-  // === SPORTS (limited edge without current data) ===
-
-  UtsOQ8yz6l: {
-    probability: 0.48,
-    confidence: "low",
-    reasoning: "NBA game, near coin flip. No strong view without current season data.",
-  },
-
+  // 76ers/Pelicans: market at 66%.
   cdp6SEEg0Z: {
     probability: 0.58,
     confidence: "low",
-    reasoning: "76ers slight favorite. Market at 61% seems slightly high. 76ers have been inconsistent in recent seasons.",
+    reasoning:
+      "76ers are favored but have been inconsistent. 66% is slightly high.",
   },
 
+  // Strickland/Hernandez: still 30%.
   ysunAU9ZuZ: {
-    probability: 0.35,
+    probability: 0.38,
     confidence: "low",
-    reasoning: "Strickland is experienced but market has him as underdog. Without current MMA rankings, slight lean that 30% undervalues him.",
+    reasoning:
+      "Strickland is experienced and crafty. 30% might undervalue him slightly. Former champion.",
   },
 
+  // Hernandez by submission: 23%.
   Rudls6lRu5: {
     probability: 0.18,
     confidence: "low",
-    reasoning: "Specific submission method is hard to predict. 23% seems slightly high for a single method of victory.",
+    reasoning:
+      "Specific submission method is hard to predict. 23% seems slightly high for one method.",
   },
+
+  // Mbappe 25 goals: dropped to 52%.
+  "6ctz0dpuOI": {
+    probability: 0.45,
+    confidence: "low",
+    reasoning:
+      "Dropped from 84%→52%. Suggests he hasn't reached 25 yet and few games remain. Market uncertainty is appropriate. Slight lean NO.",
+  },
+
+  // Nvidia stock Feb>Jan: 38%.
+  dhutplcugE: {
+    probability: 0.40,
+    confidence: "low",
+    reasoning:
+      "Without current price data, roughly trust market. Slight lean YES given AI momentum.",
+  },
+
+  // Trump attend Olympics hockey final: crashed to 14%.
+  uUs9IO896I: {
+    probability: 0.08,
+    confidence: "medium",
+    reasoning:
+      "Dropped from 68%→14%. Likely US didn't make the final or logistics make it very unlikely. Trump attending a foreign event is logistically complex. 14% still seems high.",
+  },
+
+  // Doping disqualification at Olympics: 48%.
+  "5d5On9NdA6": {
+    probability: 0.35,
+    confidence: "low",
+    reasoning:
+      "Major doping disqualification at any Olympics is uncommon during the games themselves. Most are caught later in re-testing. Olympics nearly over. 48% seems high.",
+  },
+
+  // === LOW/NO EDGE (keeping for data volume) ===
+
+  S6ItCSyttE_skip: undefined as never, // already included above
 
   lzOdh2y005: {
     probability: 0.50,
@@ -228,76 +194,56 @@ const estimates: Record<string, ClaudeEstimate> = {
     reasoning: "Cavs vs Thunder — two elite teams. Near coin flip.",
   },
 
-  UQSUhcqOq5: {
-    probability: 0.55,
-    confidence: "low",
-    reasoning: "Nuggets slight favorite over Warriors. Market at 59% seems slightly high.",
-  },
-
-  LEALz8zsZO: {
-    probability: 0.62,
-    confidence: "low",
-    reasoning: "Celtics have been dominant. Even away vs Lakers, Celtics should be favored. Market at 56% might undervalue them.",
-  },
-
   QOyPINEUz0: {
     probability: 0.50,
     confidence: "low",
-    reasoning: "Spurs vs Pistons. Both rebuilding teams. Near coin flip.",
+    reasoning: "Spurs vs Pistons. Rebuilding teams. Near coin flip.",
   },
 
-  // === FINANCE (limited edge without current data) ===
-
-  dhutplcugE: {
-    probability: 0.40,
+  "0gy5o8mr6s": {
+    probability: 0.15,
     confidence: "low",
-    reasoning: "Nvidia stock monthly comparison. Without current price data, roughly trust market. Slight lean toward YES given AI momentum.",
+    reasoning:
+      "SC granted presidential immunity but hush money acts were pre-presidential. Ultimate overturn possible. Market at 11% might be slightly low.",
   },
 
-  puIO9tcgdO: {
-    probability: 0.50,
+  zgpsAu5ts0: {
+    probability: 0.12,
     confidence: "low",
-    reasoning: "Nvidia Q4 FY2026 above $67B. Massive growth needed but Nvidia has consistently beaten estimates. Market at 42% might be slightly low.",
+    reasoning:
+      "26 immigration shootings since Jan 2025, 6 deaths (~0.5/month). 7-day window gives ~0.12 probability.",
   },
 
-  LNPQz0OlUI: {
-    probability: 0.88,
-    confidence: "medium",
-    reasoning: "Lower bar than $67B. If consensus is near $65B, this should be likely. Nvidia typically beats estimates. 91% might be slightly high but close.",
+  zLn2tpCZRu: {
+    probability: 0.02,
+    confidence: "high",
+    reasoning:
+      "A signed US-Iran agreement in ~6 days is virtually impossible given diplomatic timelines.",
+  },
+
+  sgzpU5tCRN: {
+    probability: 0.02,
+    confidence: "high",
+    reasoning:
+      "DHS explicitly said no immigration enforcement abroad. Essentially impossible.",
+  },
+
+  s92PSpZlus: {
+    probability: 0.005,
+    confidence: "high",
+    reasoning:
+      "Military invasion of a NATO ally territory is essentially impossible.",
   },
 
   n59qp9usU5: {
     probability: 0.25,
     confidence: "low",
-    reasoning: "Without current S&P data, roughly trust market at 23%. Slight lean toward the round number not being breached.",
-  },
-
-  // === OTHER ===
-
-  Ncy9OQ2dS0: {
-    probability: 0.08,
-    confidence: "low",
-    reasoning: "500k subs EVERY day is very demanding. MrBeast growth varies day to day. Some days below threshold is likely. Market at 13% seems slightly high.",
-  },
-
-  "6ctz0dpuOI": {
-    probability: 0.80,
-    confidence: "low",
-    reasoning: "Without knowing Mbappe's current goal count, roughly trust market. 84% seems about right, slight lean lower.",
-  },
-
-  "8A0ASuCLN2": {
-    probability: 0.50,
-    confidence: "low",
-    reasoning: "UK solar output Saturday vs Friday in February. Without weather forecast data, base rate is ~50%. Market at 43% suggests slight lean to NO.",
-  },
-
-  "6Ymg3Bcox6drzU230YMa": {
-    probability: 0.50,
-    confidence: "low",
-    reasoning: "Andrew Tate UK trial hasn't started (Romanian proceedings first). Market extends. 60% seems slightly high given procedural barriers. Not enough UK legal context to be confident.",
+    reasoning: "Without current S&P data, roughly trust market.",
   },
 };
+
+// Remove the undefined placeholder
+delete (estimates as any).S6ItCSyttE_skip;
 
 async function main() {
   const config = loadConfig();
@@ -305,14 +251,13 @@ async function main() {
   // Override for calibration run
   config.edgeThreshold = 0.05;  // 5% edge — cast wider net
   config.maxBetAmount = 25;      // M$25 hard cap per bet
-  config.maxImpactPct = 0.02;   // 2% max price impact
 
   const me = await getMe(config.manifoldApiKey);
   const bankroll = me.balance;
   logInfo(`User: ${me.username} | Balance: M$${bankroll.toFixed(0)}`);
   logInfo(`Mode: ${config.dryRun ? "DRY RUN" : "LIVE"}`);
   logInfo(`Edge threshold: ${(config.edgeThreshold * 100).toFixed(0)}%`);
-  logInfo(`Max bet: M$${config.maxBetAmount} | Max impact: ${(config.maxImpactPct * 100).toFixed(0)}%\n`);
+  logInfo(`Max bet: M$${config.maxBetAmount} | Slippage-aware Kelly sizing\n`);
 
   const decisions: TradeDecision[] = [];
   const marketIds = Object.keys(estimates);
@@ -320,8 +265,14 @@ async function main() {
   for (const marketId of marketIds) {
     try {
       const market = await getMarket(config.manifoldApiKey, marketId);
-      const estimate = estimates[marketId]!;
 
+      // Skip if market already closed or resolved
+      if (market.isResolved || market.closeTime < Date.now()) {
+        logInfo(`  --- Skipping ${market.question.slice(0, 50)} (closed/resolved)`);
+        continue;
+      }
+
+      const estimate = estimates[marketId]!;
       const decision = makeDecision(market, estimate, bankroll, config);
       logDecision(decision);
       decisions.push(decision);
