@@ -35,14 +35,14 @@ export function filterMarkets(
 /**
  * Calculate edge between our estimate and the market.
  */
-export function calculateEdge(estimate: number, marketProb: number): number {
+function calculateEdge(estimate: number, marketProb: number): number {
   return Math.abs(estimate - marketProb);
 }
 
 /**
  * Determine bet direction.
  */
-export function getDirection(
+function getDirection(
   estimate: number,
   marketProb: number
 ): "YES" | "NO" {
@@ -61,19 +61,20 @@ export function getDirection(
  *   p_no = 1 - estimate
  *   f* = (b * p_no - (1 - p_no)) / b
  */
-export function kellyFraction(
+function kellyFraction(
   estimate: number,
   marketProb: number,
   direction: "YES" | "NO"
 ): number {
+  const clampedProb = Math.min(0.99, Math.max(0.01, marketProb));
   let b: number;
   let p: number;
 
   if (direction === "YES") {
-    b = (1 - marketProb) / marketProb;
+    b = (1 - clampedProb) / clampedProb;
     p = estimate;
   } else {
-    b = marketProb / (1 - marketProb);
+    b = clampedProb / (1 - clampedProb);
     p = 1 - estimate;
   }
 
@@ -85,7 +86,7 @@ export function kellyFraction(
 /**
  * Size a bet using fractional Kelly with position limits.
  */
-export function sizeBet(
+function sizeBet(
   fullKelly: number,
   bankroll: number,
   config: Config
@@ -113,7 +114,7 @@ export function sizeBet(
  * Price impact approximation for CPMM: buying amount A shifts the effective
  * average fill price by ~A / (4 * liquidity) against us.
  */
-export function sizeBetWithSlippage(
+function sizeBetWithSlippage(
   estimate: number,
   marketProb: number,
   direction: "YES" | "NO",

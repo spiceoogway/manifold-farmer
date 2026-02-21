@@ -1,6 +1,6 @@
 import type { Config, TradeDecision, TradeExecution } from "./types.js";
 import { placeBet } from "./manifold.js";
-import { logTrade, logInfo } from "./logger.js";
+import { logTrade, logInfo, logError } from "./logger.js";
 
 export async function executeBets(
   decisions: TradeDecision[],
@@ -43,7 +43,7 @@ export async function executeBets(
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         execution.result = { error: msg };
-        logInfo(`FAILED to bet on ${decision.question.slice(0, 60)}: ${msg}`);
+        logError(`Failed to bet on ${decision.question.slice(0, 60)}: ${msg}`);
       }
     }
 

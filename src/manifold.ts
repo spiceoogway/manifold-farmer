@@ -29,13 +29,26 @@ async function manifoldGet<T>(
       url.searchParams.set(k, v);
     }
   }
-  const res = await fetch(url.toString(), {
-    headers: { Authorization: `Key ${apiKey}` },
-  });
-  if (!res.ok) {
-    throw new Error(`Manifold API ${path}: ${res.status} ${await res.text()}`);
+
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), {
+      headers: { Authorization: `Key ${apiKey}` },
+    });
+  } catch (err) {
+    throw new Error(`Manifold API ${path}: network error: ${err instanceof Error ? err.message : String(err)}`);
   }
-  return res.json() as Promise<T>;
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "(unreadable body)");
+    throw new Error(`Manifold API ${path}: ${res.status} ${body}`);
+  }
+
+  try {
+    return (await res.json()) as T;
+  } catch {
+    throw new Error(`Manifold API ${path}: invalid JSON response`);
+  }
 }
 
 async function manifoldPost<T>(
@@ -44,18 +57,31 @@ async function manifoldPost<T>(
   body: unknown
 ): Promise<T> {
   await rateLimit();
-  const res = await fetch(`${BASE}${path}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Key ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    throw new Error(`Manifold API POST ${path}: ${res.status} ${await res.text()}`);
+
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Key ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    throw new Error(`Manifold API POST ${path}: network error: ${err instanceof Error ? err.message : String(err)}`);
   }
-  return res.json() as Promise<T>;
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "(unreadable body)");
+    throw new Error(`Manifold API POST ${path}: ${res.status} ${body}`);
+  }
+
+  try {
+    return (await res.json()) as T;
+  } catch {
+    throw new Error(`Manifold API POST ${path}: invalid JSON response`);
+  }
 }
 
 export async function getMe(apiKey: string): Promise<ManifoldUser> {

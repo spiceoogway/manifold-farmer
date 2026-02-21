@@ -77,6 +77,10 @@ Respond with ONLY a JSON object: {"probability": 0.XX, "confidence": "low|medium
   const text =
     response.content[0]?.type === "text" ? response.content[0].text : "";
 
+  if (!text) {
+    throw new Error(`Empty response from Claude for market: ${market.id}`);
+  }
+
   return parseEstimate(text);
 }
 
@@ -87,14 +91,19 @@ function parseEstimate(text: string): ClaudeEstimate {
     throw new Error(`Could not parse Claude response as JSON: ${text.slice(0, 200)}`);
   }
 
-  const parsed = JSON.parse(jsonMatch[0]);
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(jsonMatch[0]);
+  } catch {
+    throw new Error(`Malformed JSON in Claude response: ${jsonMatch[0].slice(0, 200)}`);
+  }
 
   const prob = Number(parsed.probability);
   if (isNaN(prob) || prob < 0 || prob > 1) {
     throw new Error(`Invalid probability: ${parsed.probability}`);
   }
 
-  const confidence = parsed.confidence;
+  const confidence = String(parsed.confidence ?? "");
   if (!["low", "medium", "high"].includes(confidence)) {
     throw new Error(`Invalid confidence: ${confidence}`);
   }

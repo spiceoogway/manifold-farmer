@@ -3,7 +3,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-export const DATA_DIR = join(__dirname, "..", "data");
+const DATA_DIR = join(__dirname, "..", "data");
 export const DECISIONS_FILE = join(DATA_DIR, "decisions.jsonl");
 export const TRADES_FILE = join(DATA_DIR, "trades.jsonl");
 export const RESOLUTIONS_FILE = join(DATA_DIR, "resolutions.jsonl");
@@ -14,5 +14,15 @@ export function readJsonl<T>(filePath: string): T[] {
   if (!existsSync(filePath)) return [];
   const content = readFileSync(filePath, "utf-8").trim();
   if (!content) return [];
-  return content.split("\n").map((line) => JSON.parse(line) as T);
+  const results: T[] = [];
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      results.push(JSON.parse(trimmed) as T);
+    } catch {
+      process.stderr.write(`Warning: skipping malformed JSONL line in ${filePath}\n`);
+    }
+  }
+  return results;
 }
