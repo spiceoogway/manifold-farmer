@@ -8,6 +8,7 @@ import { readJsonl, RESOLUTIONS_FILE } from "./data.js";
 import { runResolve } from "./resolver.js";
 import { computeCalibration } from "./calibration.js";
 import { formatFeedback } from "./feedback.js";
+import { runSell } from "./seller.js";
 import type { TradeDecision, Resolution } from "./types.js";
 
 async function runScan() {
@@ -158,6 +159,13 @@ function runStats() {
   console.log("");
 }
 
+async function runSellCmd() {
+  const config = loadConfig();
+  logInfo(`Sell mode — ${config.dryRun ? "DRY RUN" : "LIVE"}`);
+  await runSell(config);
+  logInfo("Done.");
+}
+
 const command = process.argv[2] || "scan";
 
 switch (command) {
@@ -173,10 +181,16 @@ switch (command) {
       process.exit(1);
     });
     break;
+  case "sell":
+    runSellCmd().catch((err) => {
+      logError(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    });
+    break;
   case "stats":
     runStats();
     break;
   default:
-    logError(`Unknown command: ${command}. Use: scan, resolve, stats`);
+    logError(`Unknown command: ${command}. Use: scan, resolve, sell, stats`);
     process.exit(1);
 }

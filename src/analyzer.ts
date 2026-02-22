@@ -1,5 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Config, ManifoldMarket, ClaudeEstimate } from "./types.js";
+import { fetchFinanceContext } from "./finance-tool.js";
+import { fetchSportsContext } from "./sports-tool.js";
 
 const SYSTEM_PROMPT = `You are an expert superforecaster trained in the methodology of Philip Tetlock's Good Judgment Project. Your task is to estimate the probability that a prediction market question resolves YES.
 
@@ -55,6 +57,15 @@ export async function estimateProbability(
     systemPrompt += "\n\n" + calibrationFeedback;
   }
 
+  // Fetch real-time data from tools
+  let dataContext = "";
+  const [financeCtx, sportsCtx] = await Promise.all([
+    fetchFinanceContext(market.question).catch(() => null),
+    fetchSportsContext(market.question).catch(() => null),
+  ]);
+  if (financeCtx) dataContext += "\n\n" + financeCtx;
+  if (sportsCtx) dataContext += "\n\n" + sportsCtx;
+
   const userPrompt = `Estimate the probability that this question resolves YES:
 
 **Question:** ${market.question}
@@ -64,7 +75,7 @@ ${description ? `**Description/Context:** ${description.slice(0, 3000)}` : ""}
 **Created by:** ${market.creatorUsername}
 **Market closes:** ${new Date(market.closeTime).toISOString().split("T")[0]}
 **Today's date:** ${new Date().toISOString().split("T")[0]}
-
+${dataContext}
 Respond with ONLY a JSON object: {"probability": 0.XX, "confidence": "low|medium|high", "reasoning": "..."}`;
 
   const response = await client.messages.create({

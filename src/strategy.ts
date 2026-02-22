@@ -1,5 +1,7 @@
 import { randomUUID } from "crypto";
 import type { Config, ManifoldMarket, ClaudeEstimate, TradeDecision } from "./types.js";
+import { isFinanceMarket } from "./finance-tool.js";
+import { isSportsMarket } from "./sports-tool.js";
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const NINETY_DAYS_MS = 90 * 24 * ONE_HOUR_MS;
@@ -191,6 +193,21 @@ export function makeDecision(
       betAmount: 0,
       action: "SKIP_LOW_EDGE",
     };
+  }
+
+  // Skip low-confidence bets unless we have a data tool for this category
+  if (estimate.confidence === "low") {
+    const hasDataTool = isFinanceMarket(market.question) || isSportsMarket(market.question);
+    if (!hasDataTool) {
+      return {
+        ...base,
+        direction: null,
+        kellyFraction: 0,
+        effectiveProb: market.probability,
+        betAmount: 0,
+        action: "SKIP_LOW_CONFIDENCE",
+      };
+    }
   }
 
   const direction = getDirection(estimate.probability, market.probability);

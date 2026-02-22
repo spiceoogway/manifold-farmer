@@ -7,6 +7,7 @@
     "start": "tsx src/index.ts",
     "scan": "tsx src/index.ts scan",
     "resolve": "tsx src/index.ts resolve",
+    "sell": "tsx src/index.ts sell",
     "stats": "tsx src/index.ts stats",
     "typecheck": "tsc --noEmit"
   },

@@ -59,7 +59,7 @@ export interface TradeDecision {
   kellyFraction: number;
   effectiveProb: number;
   betAmount: number;
-  action: "BET" | "SKIP_LOW_EDGE" | "SKIP_NEGATIVE_KELLY" | "SKIP_ERROR";
+  action: "BET" | "SKIP_LOW_EDGE" | "SKIP_NEGATIVE_KELLY" | "SKIP_LOW_CONFIDENCE" | "SKIP_ERROR";
   // Market context at decision time
   liquidity: number;
   closeTime: string;

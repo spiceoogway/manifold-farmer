@@ -119,3 +119,11 @@ export async function placeBet(
     amount: Math.round(amount),
   });
 }
+
+export async function sellShares(
+  apiKey: string,
+  marketId: string,
+  outcome: "YES" | "NO"
+): Promise<unknown> {
+  return manifoldPost(`/market/${marketId}/sell`, apiKey, { outcome });
+}
