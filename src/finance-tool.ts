@@ -5,6 +5,7 @@
  */
 
 const YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart";
+const FETCH_TIMEOUT_MS = 15_000;
 
 // Patterns that indicate a finance-related market
 const FINANCE_PATTERNS: { pattern: RegExp; symbols?: string[]; type: string }[] = [
@@ -81,6 +82,7 @@ async function fetchChartQuote(symbol: string): Promise<string | null> {
       headers: {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
       },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
 
     if (!res.ok) return null;

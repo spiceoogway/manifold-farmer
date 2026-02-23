@@ -5,6 +5,7 @@
 
 const ESPN_SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports";
 const ESPN_ODDS = "https://sports.core.api.espn.com/v2/sports";
+const FETCH_TIMEOUT_MS = 15_000;
 
 interface SportConfig {
   pattern: RegExp;
@@ -157,6 +158,7 @@ async function fetchScoreboard(config: SportConfig, dateStr?: string): Promise<E
 
     const res = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) return null;
 
@@ -218,6 +220,7 @@ async function fetchOdds(config: SportConfig, eventId: string): Promise<ESPNOdds
     const url = `${ESPN_ODDS}/${config.espnSport}/leagues/${config.espnLeague}/events/${eventId}/competitions/${eventId}/odds?lang=en&region=us`;
     const res = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) return null;
 

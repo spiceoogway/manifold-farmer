@@ -1,239 +1,251 @@
-# Self-Improvement Roadmap
+# Roadmap
 
-## Goal
+## Vision
 
-Build a prediction market bot that continuously improves its forecasting quality and P&L through fast feedback loops, rich data collection, and closed-loop correction.
+Build a dominant prediction market trading system that continuously improves through fast feedback loops. Trade on **Polymarket** (real money, deep liquidity, 1,300+ fast-resolution markets per 48h) using Manifold as a low-stakes playground for experimentation.
 
-## North Star: Fast Resolution Markets
+## Why Polymarket First
 
-**The #1 priority is maximizing resolved bets per unit time.** Every resolution is a calibration data point. A market that resolves in 2 days is 15x more valuable for training than one that resolves in 30 days.
+Market supply analysis (Feb 2026) showed:
 
-Fast-resolution markets include:
-- **Sports game outcomes** — resolve in hours (NBA, NHL, NFL, MLB, UFC)
-- **Stock/commodity price targets** — resolve on specific dates
-- **Earnings announcements** — resolve on earnings date
-- **"By end of [date]" markets** — explicit near-term deadlines
-- **Daily markets** — resolve next day
+| Platform | Markets resolving in 48h | Tradeable (>$10k liq) | 24h volume |
+|----------|--------------------------|----------------------|------------|
+| **Polymarket** | **~1,374** | **~600** | **$20.4M** |
+| Kalshi | ~23,200 (mostly auto-generated parlays) | ~100 | ~$2M |
+| Manifold | ~30 | ~5 | ~M$300k (play money) |
 
-The bot should systematically prioritize these over long-horizon markets. The `resolutionSpeedScore()` in strategy.ts ranks markets by expected resolution speed, and `filterMarkets()` returns candidates sorted fastest-first.
+Polymarket has **45x the fast-resolution supply** of Manifold. NBA alone produces 447 markets per 48h with $16.7M daily volume. The training loop needs volume — Manifold can't supply it.
 
-**Target: 500+ resolved bets per week within 30 days.**
+**Polymarket API**: `gamma-api.polymarket.com/markets` — public, no auth, returns prices/volume/liquidity. CLOB orderbook (not AMM), minimum order $5 USDC, tight spreads (0.1% on high-volume markets).
 
-This requires ~70+ bets per day. The strategy:
-- **Sports markets**: 10-15 NBA/NHL/MLB games daily, each with Manifold markets. ESPN odds data gives us an edge on every game.
-- **Stock/commodity markets**: Multiple stock price and earnings markets resolve daily.
-- **Daily/fast-closing markets**: Sweep every binary market closing within 48 hours where we can form an estimate.
-- **Smaller bet sizes**: M$5-20 per bet to spread bankroll across 70+ daily bets (Kelly still applies).
-- **Higher scan frequency**: Run scan 4-6x per day with multiple search queries per scan.
-- **Automated pipeline**: This volume is only possible with a fully automated scan→analyze→bet loop.
+**Kalshi complement**: Strong on daily BTC/ETH price strikes ($691k daily vol) and monthly economic data (Fed decisions at $12.3M OI, CPI, PCE). Narrow but deep.
+
+---
 
 ## Core Principles
 
 ### 1. Fast Feedback Loops
 
-Don't wait for market resolution (weeks/months) to learn. Extract signal at every timescale:
+Every resolution is a calibration data point. A market that resolves in 2 hours is 360x more valuable than one that resolves in 30 days.
 
 | Timescale | Signal | Source |
 |-----------|--------|--------|
+| **Minutes** | Fill quality, slippage vs. expected | Trade execution logs |
 | **Hourly** | Did the market move toward or away from our estimate? | Position snapshots |
 | **Daily** | Are our open positions trending profitable or losing? | Aggregate snapshot P&L |
-| **Weekly** | Which categories and confidence levels are performing? | Snapshot-based calibration |
-| **On resolution** | Final P&L, Brier score, win/loss | Resolution records |
-
-The key insight: **market movement after our bet is a fast proxy for forecast accuracy**. If we estimate 75% and the market moves from 60% to 70%, that's confirming signal within hours — we don't need to wait months for resolution.
+| **Weekly** | Which categories and confidence levels are performing? | Resolution-based calibration |
 
 ### 2. Data Density Over Data Volume
 
-Every bet should maximize learning signal. Record not just the decision, but the full context:
-
-- What data tools returned (finance prices, sports odds)
-- Claude's full reasoning chain
-- Market description and metadata
-- Calibration feedback that was active at decision time
-
-When reviewing performance, we can then ask: "Do bets with finance data outperform those without?" or "Which reasoning patterns correlate with wins?"
+Record the full context for every bet — not just the decision, but what data informed it, what calibration feedback was active, what the oracle price was. When reviewing performance, we can ask: "Do bets with ESPN odds data outperform those without?" or "Where does the oracle disagree with Claude?"
 
 ### 3. Closed-Loop Correction
 
-Performance data must flow back into decisions automatically:
+Performance data flows back into decisions automatically:
 
 ```
-bet → snapshot → analyze drift → update feedback → better bet
-         ↑                                              |
-         └──────────────────────────────────────────────┘
+bet → snapshot → analyze drift → update strategy params → better bet
+       ↑                                                       |
+       └───────────────────────────────────────────────────────┘
 ```
-
-Currently: calibration feedback after resolution (slow loop).
-Target: drift-based feedback after hours (fast loop) + resolution feedback (accurate loop).
 
 ### 4. Measure Everything, Trust Nothing
 
-- Track ROI by category, confidence level, data tool presence, time of day, market age
-- Don't assume any rule is working — validate with data
-- A/B test implicitly: Claude's confidence labels are a built-in hypothesis ("high" confidence should outperform "medium")
-- If a signal doesn't correlate with outcomes after 50+ bets, remove it
+Track ROI by category, confidence level, data source, time of day, market age. If a signal doesn't correlate with outcomes after 50+ bets, remove it.
 
 ### 5. Fail Fast, Learn Cheap
 
-- Start with small bets on uncertain categories to gather data
-- Scale up sizing only on categories with proven positive ROI
-- Trim losing positions early rather than hoping for recovery
-- Every loss should produce more learning signal than the M$ it cost
+Start with small bets on uncertain categories to gather data. Scale up only on categories with proven positive ROI. Every loss should produce more learning signal than the dollars it cost.
 
 ---
 
 ## Implementation Phases
 
-### Phase 1: Hourly Monitoring (Now)
+### Phase 0: Production Hardening (Now)
 
-**Goal:** Get feedback every hour instead of waiting for resolution.
+**Goal:** Make the bot reliable enough for autonomous operation.
 
-#### 1.1 — `monitor` command
-Create a lightweight CLI command that:
-- Records position snapshots for all open bets (already implemented in resolve)
-- Computes aggregate portfolio metrics (total unrealized P&L, drift direction)
-- Optionally checks for new resolutions
+- [x] Request timeouts on all fetch calls (30s default)
+- [x] CI/CD — GitHub Actions for typecheck on PRs
+- [ ] Retry with exponential backoff on transient API errors
+- [ ] Extract shared P&L calculation module (currently duplicated 3x)
+- [ ] Add tests for core math (Kelly, P&L, calibration)
 
-This should run every hour. Current `resolve` already does this but we can make a dedicated lighter path.
+### Phase 1: Polymarket Integration (Week 1)
 
-**Run cadence:** Every 1 hour
+**Goal:** Fetch Polymarket markets and use their prices as probability estimates.
 
-#### 1.2 — Estimate drift tracking
-For each snapshot, compute:
+#### 1.1 — Polymarket client (`src/polymarket.ts`)
+- Fetch markets from `gamma-api.polymarket.com/markets`
+- Parse `outcomePrices`, `volume`, `liquidity`, `endDate`, `tags`
+- Filter to fast-resolution binary markets (endDate within 7 days, volume > $10k)
+
+#### 1.2 — Market matcher (`src/market-matcher.ts`)
+- Match Polymarket ↔ Manifold questions by keyword overlap
+- Start simple: normalized keyword intersection score
+- Require manual confirmation threshold (>0.8 similarity) for auto-matching
+
+#### 1.3 — Oracle scan command (`pnpm scan:oracle`)
+- For matched markets: use Polymarket price as probability estimate
+- Compute edge = |polyPrice - manifoldPrice|
+- Kelly sizing using Polymarket price as "true" probability
+- Place bets on Manifold, log Polymarket reference price alongside
+
+#### 1.4 — Oracle performance tracking
+- Record `polymarketPrice` in every trade record
+- After resolution: compare oracle accuracy vs. Claude accuracy
+- Track: does betting Manifold toward Polymarket price actually profit?
+
+### Phase 2: Polymarket Trading (Week 2-3)
+
+**Goal:** Trade directly on Polymarket with real USDC.
+
+#### 2.1 — Polymarket CLOB client
+- Authenticate with Polymarket API (API key + wallet signing)
+- Place limit orders on the CLOB (not market orders — control slippage)
+- Monitor fills, cancels, partial fills
+
+#### 2.2 — Venue abstraction
+- Common interface for market fetching, bet placement, position tracking
+- `Venue` interface: `fetchMarkets()`, `placeBet()`, `getPositions()`, `checkResolutions()`
+- Implementations: `ManifoldVenue`, `PolymarketVenue`, later `KalshiVenue`
+
+#### 2.3 — Cross-venue strategy
+- Use Polymarket prices to bet mispriced Manifold markets (oracle approach)
+- Use ESPN/finance data to bet mispriced Polymarket sports/stock markets (data edge)
+- Use Claude for markets where no structured data exists (reasoning edge)
+
+#### 2.4 — Risk management for real money
+- Position limits per market (max $100 initially)
+- Daily loss limit (max $500/day)
+- Portfolio concentration limits (no >10% in correlated markets)
+- Kill switch: stop all trading if daily loss exceeds threshold
+
+### Phase 3: Fast Training Loop (Week 3-4)
+
+**Goal:** 500+ resolved bets per week. Maximize calibration data points.
+
+#### 3.1 — Sports-first strategy
+NBA dominates Polymarket's fast-resolution supply (447 markets/48h, $16.7M volume). Target:
+- Every NBA game daily (10-15 games × multiple markets per game)
+- Use ESPN odds as probability estimates
+- Small bet sizes ($5-20) to spread across 50+ daily bets
+- Track: moneyline-implied-prob vs. Polymarket price vs. actual outcome
+
+#### 3.2 — Crypto daily markets
+Kalshi has BTC/ETH daily price strike markets ($691k daily volume). Target:
+- Daily BTC/ETH price brackets
+- Use exchange data as probability input
+- 40-90 strike prices per daily snapshot = many bets per day
+
+#### 3.3 — Economic data releases
+Monthly but high-volume: Fed decisions ($12.3M OI), CPI, PCE, jobs reports. Target:
+- Track consensus estimates vs. market prices
+- Bet when market diverges from economist consensus
+- Small number of bets but high confidence
+
+#### 3.4 — Hourly monitoring
+- Record position snapshots for all open bets
+- Compute drift: `(currentProb - entryProb) × direction_sign`
+- Track rolling agreement rate (% of positions with positive drift)
+- Inject drift feedback into strategy: if agreement < 40%, be less contrarian
+
+### Phase 4: Category Intelligence (Week 4-5)
+
+**Goal:** Learn which categories we're good at and focus there.
+
+#### 4.1 — Per-category calibration
+- Auto-tag each bet with category (sports/crypto/politics/tech/economics)
+- Compute separate Brier scores, ROI, win rates per category
+- Track which data sources correlate with wins per category
+
+#### 4.2 — Category-specific strategy
+- Scale up bet sizes in categories with proven ROI
+- Reduce or skip categories with negative ROI after 50+ bets
+- Tailor strategy per category (e.g., sports = odds data, crypto = exchange prices)
+
+#### 4.3 — Feedback loop
+- Inject category-specific calibration into Claude's prompt for warm-path analysis
+- "Sports with ESPN odds: 72% win rate. Politics without oracle: 41%. Only bet politics when oracle available."
+
+### Phase 5: Autonomous Operation (Week 5-6)
+
+**Goal:** The bot runs without human intervention.
+
+#### Three-layer architecture
+
 ```
-drift_score = (currentProb - entryProb) × direction_sign
-```
-Where `direction_sign = +1` for YES bets, `-1` for NO bets.
-
-Positive drift = market moving toward our position = confirming signal.
-
-Track rolling average drift score. If systematically negative, Claude is betting against the crowd and the crowd is right.
-
-#### 1.3 — Drift-based feedback
-After accumulating 24+ hours of snapshots per position:
-- Compute "market agreement rate" — what % of positions have positive drift?
-- If agreement rate < 40%: inject feedback "Markets are consistently moving against your estimates. Be less contrarian."
-- If agreement rate > 70%: positions are confirming, current approach is working
-
-### Phase 2: Rich Context Logging (Week 1)
-
-**Goal:** Record everything needed to diagnose why bets win or lose.
-
-#### 2.1 — Log data tool responses
-Store the actual finance/sports context that was fed to Claude alongside each decision. Currently we pass it to Claude but don't persist it.
-
-Add to TradeDecision:
-```typescript
-dataToolContext?: string;  // what finance/sports tools returned
-```
-
-#### 2.2 — Log active calibration feedback
-Store what calibration feedback was active when each decision was made. Lets us measure whether feedback is actually improving decisions.
-
-Add to TradeDecision:
-```typescript
-calibrationFeedbackActive?: boolean;
-feedbackVersion?: number;  // increment each time feedback changes
+┌──────────────────────────────────────────────────────┐
+│ HOT PATH — every 1-2 hours, pure code, no LLM        │
+│                                                       │
+│  cron → fetch Polymarket/Kalshi/ESPN prices           │
+│       → fetch Manifold/Polymarket markets             │
+│       → match and compute edge                        │
+│       → Kelly sizing → execute bets                   │
+│       → record snapshots, check resolutions           │
+│                                                       │
+│  No LLM cost. Runs in seconds. 100+ markets/scan.    │
+├──────────────────────────────────────────────────────┤
+│ WARM PATH — every few hours, single Claude Code agent │
+│                                                       │
+│  cron → claude --headless "review cycle"              │
+│       → review calibration data, adjust params        │
+│       → analyze non-oracle markets with Claude        │
+│       → generate performance report                   │
+│                                                       │
+│  Opus-level reasoning on strategy.                    │
+├──────────────────────────────────────────────────────┤
+│ COLD PATH — weekly, Claude Code agent team            │
+│                                                       │
+│  manual or cron → multi-agent strategy review         │
+│       → Auditor: P&L deep-dive, systemic biases      │
+│       → Scout: new categories, data sources           │
+│       → Engineer: codebase improvements               │
+│       → Lead: synthesize, update strategy             │
+│                                                       │
+│  Deep analysis. Codebase improvements.                │
+└──────────────────────────────────────────────────────┘
 ```
 
-#### 2.3 — Category tagging
-Auto-tag each decision with a category (politics, tech, sports, finance, etc.) using the keyword classifier from market-analysis.ts. Enables per-category performance tracking.
-
-Add to TradeDecision:
-```typescript
-category?: string;
+#### 5.1 — Hot path cron
+```bash
+*/90 * * * * cd ~/manifold-farmer && pnpm scan:oracle >> /tmp/hot.log 2>&1
+0 * * * *   cd ~/manifold-farmer && pnpm monitor >> /tmp/monitor.log 2>&1
 ```
 
-### Phase 3: Category-Level Intelligence (Week 2)
+#### 5.2 — Warm path agent
+```bash
+0 */4 * * * cd ~/manifold-farmer && claude --headless -p "Run review cycle" >> /tmp/warm.log 2>&1
+```
 
-**Goal:** Learn which market categories we're good at and focus there.
+#### 5.3 — Cold path agent team
+```bash
+# Weekly — deep strategy review
+0 6 * * 1 cd ~/manifold-farmer && claude --headless -p "Weekly strategy review" >> /tmp/cold.log 2>&1
+```
 
-#### 3.1 — Per-category calibration
-Extend calibration.ts to compute separate reports per category:
-- Which categories have positive ROI?
-- Which categories have the best Brier scores?
-- Where are we over/under-confident by category?
-
-#### 3.2 — Category-specific feedback
-Instead of generic "you're overconfident in 60-70%", tell Claude:
-- "On politics markets, you're overconfident by ~15pts. On tech markets, you're well-calibrated."
-- "Sports markets with odds data: 72% win rate. Without: 41%. Only bet sports with data."
-
-#### 3.3 — Category-based market selection
-Prioritize scanning categories with proven positive ROI. Deprioritize or skip categories where we consistently lose.
-
-### Phase 4: Intelligent Position Management (Week 3)
+### Phase 6: Intelligent Position Management (Week 6+)
 
 **Goal:** Trim positions intelligently rather than binary sell-all.
 
-#### 4.1 — Partial sells
-Instead of selling entire position at thresholds, trim proportionally:
-- At 50% of max payout: sell 30% of position
-- At 70% of max payout: sell another 40%
-- Let remaining 30% ride to resolution
-
-#### 4.2 — Re-evaluation sells
-Before selling, re-run Claude on the market with updated data. If Claude's new estimate still supports the position, hold. If estimate has flipped, sell.
-
-#### 4.3 — Correlation-aware trimming
-If multiple positions are in correlated markets (e.g., two NVIDIA markets), trim one when the other confirms to reduce concentration risk.
-
-### Phase 5: Broader Market Coverage (Week 4)
-
-**Goal:** Find more edge by searching more markets.
-
-#### 5.1 — Expand search
-Currently fetching top 50 markets by liquidity. Expand to:
-- Multiple search queries (by category keywords)
-- Different sort orders (newest, closing soon, trending)
-- Target 200+ candidates per scan, filter down to 20 for Claude analysis
-
-#### 5.2 — Pre-filter with heuristics
-Before spending Claude API calls, score markets by:
-- Liquidity (higher = more reliable prices)
-- Bettor count (fewer = more likely mispriced)
-- Category (prefer categories with proven ROI)
-- Time to close (sweet spot: 1-4 weeks)
-
-#### 5.3 — Track opportunity cost
-Log markets we skipped. Periodically check: would we have been right? Helps calibrate our filter thresholds.
-
-### Phase 6: Polymarket Consideration (Future)
-
-**Goal:** Evaluate whether the more adversarial environment is worth the higher liquidity.
-
-#### Pros
-- Much higher liquidity = bigger positions possible
-- Real-money markets = stronger price signal
-- More markets, especially current events
-
-#### Cons
-- More sophisticated traders = less mispricing
-- Need to manage real crypto (USDC)
-- API is more complex (CLOB vs. AMM)
-- Regulatory considerations
-
-#### Prerequisites before switching
-- Proven positive ROI on Manifold over 100+ resolved bets
-- Category-level intelligence working (know where we have edge)
-- Robust position management (partial sells, stop losses)
-- Confidence that our edge is real, not just Manifold noise
-
-#### Hybrid approach
-Run both simultaneously:
-- Manifold for learning and data collection (low stakes, fast iteration)
-- Polymarket for proven strategies only (higher stakes, less experimentation)
+- **Partial sells**: At 50% of max payout sell 30%, at 70% sell another 40%, let 30% ride
+- **Re-evaluation**: Before selling, re-assess with updated data. Hold if thesis intact.
+- **Correlation-aware trimming**: If multiple positions in correlated markets, trim to reduce concentration.
 
 ---
 
-## Recommended Run Cadences
+## Manifold as Playground
 
-| Command | Frequency | Purpose |
-|---------|-----------|---------|
-| `pnpm monitor` | Every 1 hour | Record snapshots, check resolutions, compute drift |
-| `pnpm scan` | Every 6 hours | Find and enter new positions |
-| `pnpm sell` | Every 4 hours | Evaluate positions for trimming |
-| `pnpm stats` | On demand | Review calibration and performance |
+Manifold remains valuable for:
+- **Experimentation**: Test new strategies with play money before deploying to Polymarket
+- **Long-tail markets**: Unique markets that don't exist on Polymarket (tech predictions, niche politics)
+- **Oracle validation**: Compare Polymarket prices against Manifold to validate the oracle approach
+- **Claude as forecaster**: Markets without structured data where Opus-level reasoning is the edge
+
+Current Manifold performance (6 resolved, 12 open):
+- 4W-2L, 67% win rate, +M$129 realized
+- Sports: 80% win rate, +123% ROI (best category)
+- +M$110 unrealized across open positions
 
 ---
 
@@ -241,17 +253,17 @@ Run both simultaneously:
 
 | Metric | Current | 30-day Target | 90-day Target |
 |--------|---------|---------------|---------------|
-| Resolved bets | 3 | 2,000+ | 10,000+ |
+| Resolved bets (all venues) | 6 | 2,000+ | 10,000+ |
 | Bets per day | ~3 | 70+ | 150+ |
-| Win rate | ~67% | 55%+ | 58%+ |
-| ROI | ~53% | 8%+ | 12%+ |
-| Brier score | TBD | < 0.22 | < 0.18 |
-| Hourly drift agreement | TBD | > 55% | > 60% |
-| Category coverage | 1-2 | 8+ | 12+ |
-| Avg time to resolution | Weeks | < 48 hours | < 24 hours |
-| Calibration data points | 3 | 2,000+ | 10,000+ |
+| Win rate | 67% | 55%+ | 58%+ |
+| ROI (Manifold) | +86% | 8%+ | 12%+ |
+| ROI (Polymarket) | N/A | 3%+ | 6%+ |
+| Brier score | 0.254 | < 0.22 | < 0.18 |
+| Venue coverage | 1 | 2 (Manifold + Poly) | 3 (+Kalshi) |
+| Avg time to resolution | Days | < 24 hours | < 12 hours |
+| Autonomous uptime | 0% | 80%+ | 95%+ |
 
-Note: ROI will decrease from 53% at scale — current number is from a small sample with favorable variance. At 70+ bets/day, even 8% ROI compounds significantly. The real value is the calibration data: 2,000+ resolved bets gives us statistically meaningful signals for every category, confidence level, and strategy parameter.
+Note: Polymarket ROI targets are lower because prices are sharper (less mispricing). But the volume makes even 3% ROI significant at scale.
 
 ---
 
@@ -259,59 +271,12 @@ Note: ROI will decrease from 53% at scale — current number is from a small sam
 
 ```
 data/
-├── decisions.jsonl     # Every market analyzed (116 records)
-├── trades.jsonl        # Every bet placed (44 records)
-├── resolutions.jsonl   # Final outcomes (3 records)
-└── snapshots.jsonl     # Hourly position snapshots (growing)
+├── decisions.jsonl     # Every market analyzed
+├── trades.jsonl        # Every bet placed (all venues)
+├── resolutions.jsonl   # Final outcomes
+├── snapshots.jsonl     # Hourly position snapshots
+├── polymarket.jsonl    # Polymarket reference prices at bet time
+└── daily-reports/      # Agent-generated performance reports
 ```
 
-All append-only JSONL. Linked by `traceId` across files.
-
-Future additions:
-- `drift.jsonl` — Computed drift scores per position per snapshot
-- `categories.jsonl` — Market category assignments and per-category metrics
-
----
-
-## Agent Architecture: Claude Code as the Forecaster
-
-### Current: Static Pipeline
-```
-search → Claude API (Sonnet, fixed prompt) → Kelly sizing → execute
-```
-Problems:
-- Anthropic API key dependency (single point of failure)
-- Fixed system prompt can't adapt in real-time
-- Sonnet is less capable than Opus for complex reasoning
-- No context across bets (each call is independent)
-
-### Target: Claude Code as the Agent
-```
-User says "run scan" → Claude Code (Opus) does:
-  1. Fetches markets via Manifold API
-  2. Fetches finance/sports data
-  3. Reads calibration data and past performance
-  4. Reasons about each market with full context
-  5. Applies Kelly sizing
-  6. Places bets and records everything
-```
-Advantages:
-- Opus-level reasoning (better than Sonnet on complex markets)
-- Full context: sees past bets, calibration data, current portfolio
-- Can adapt strategy in real-time based on conversation
-- No separate API key needed
-- Can explain reasoning interactively
-
-### Future: Agent Teams (Experimental)
-When Claude Code agent teams stabilize, consider:
-- **Market Scout**: searches across multiple sort orders, classifies by resolution speed
-- **Analyst**: estimates probabilities with full context and data tools
-- **Portfolio Manager**: monitors positions, computes drift, decides trims
-- **Lead**: coordinates the team, synthesizes findings, makes final calls
-
-Agent teams are best for development sprints (improving the codebase in parallel) rather than runtime execution. For runtime, the single-agent approach (Claude Code as forecaster) is more practical and cost-effective.
-
-### Run Modes
-1. **Interactive** (current): User asks Claude Code to "run scan" / "run monitor" / "run sell"
-2. **Semi-autonomous**: Claude Code runs the full cycle on request, reports results, asks for approval before executing
-3. **Autonomous** (future): Scheduled execution via cron calling Claude Code headless, with human review of decisions log
+All append-only JSONL. Linked by `traceId` across files. Each trade record includes `venue: "manifold" | "polymarket" | "kalshi"` for cross-venue analysis.
