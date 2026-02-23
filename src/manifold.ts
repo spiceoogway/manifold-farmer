@@ -1,6 +1,7 @@
 import type { ManifoldUser, ManifoldMarket, BetResponse } from "./types.js";
 
 const BASE = "https://api.manifold.markets/v0";
+const FETCH_TIMEOUT_MS = 30_000;
 
 // Rate limiter: 450 req/min safety margin (Manifold allows 500)
 let requestTimes: number[] = [];
@@ -34,6 +35,7 @@ async function manifoldGet<T>(
   try {
     res = await fetch(url.toString(), {
       headers: { Authorization: `Key ${apiKey}` },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
   } catch (err) {
     throw new Error(`Manifold API ${path}: network error: ${err instanceof Error ? err.message : String(err)}`);
@@ -67,6 +69,7 @@ async function manifoldPost<T>(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
   } catch (err) {
     throw new Error(`Manifold API POST ${path}: network error: ${err instanceof Error ? err.message : String(err)}`);
