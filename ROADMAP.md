@@ -198,42 +198,87 @@ Before spending Claude API calls, score markets by:
 #### 5.3 — Track opportunity cost
 Log markets we skipped. Periodically check: would we have been right? Helps calibrate our filter thresholds.
 
-### Phase 6: Polymarket Consideration (Future)
+### Phase 6: Polymarket Price Oracle (Week 4-5)
 
-**Goal:** Evaluate whether the more adversarial environment is worth the higher liquidity.
+**Goal:** Use Polymarket's real-money prices as a "true probability" oracle to find mispriced Manifold markets — no LLM needed for the core loop.
 
-#### Pros
-- Much higher liquidity = bigger positions possible
-- Real-money markets = stronger price signal
-- More markets, especially current events
+#### The Insight
 
-#### Cons
-- More sophisticated traders = less mispricing
-- Need to manage real crypto (USDC)
-- API is more complex (CLOB vs. AMM)
-- Regulatory considerations
+Polymarket is a real-money prediction market with sophisticated traders and deep liquidity. Its prices are among the best publicly available probability estimates. Manifold is a play-money market with softer prices and frequent mispricing. When the same question exists on both platforms, the price gap is often exploitable.
 
-#### Prerequisites before switching
-- Proven positive ROI on Manifold over 100+ resolved bets
-- Category-level intelligence working (know where we have edge)
-- Robust position management (partial sells, stop losses)
-- Confidence that our edge is real, not just Manifold noise
+Example found in exploration: Iran strike market — Polymarket 4%, Manifold 20%. That's a 16-point gap on a well-traded event.
 
-#### Hybrid approach
-Run both simultaneously:
-- Manifold for learning and data collection (low stakes, fast iteration)
-- Polymarket for proven strategies only (higher stakes, less experimentation)
+#### Architecture: `src/polymarket-tool.ts`
+
+```typescript
+// 1. Fetch Polymarket markets
+//    GET https://gamma-api.polymarket.com/markets
+//    Public API, no auth needed. Returns outcomePrices, volume, liquidity.
+
+// 2. Match to Manifold markets
+//    Keyword + semantic matching on question text.
+//    Start simple (exact keyword overlap), improve with embeddings later.
+
+// 3. Compute cross-market edge
+//    edge = |polyPrice - manifoldPrice|
+//    direction = bet Manifold toward Polymarket price
+//    Only bet when edge > threshold AND Polymarket volume > $50k (confident price)
+
+// 4. Size with Kelly, using Polymarket price as the "true" probability
+```
+
+#### Why This Changes Everything
+
+- **No LLM needed in the hot path.** The Polymarket price IS the estimate. Pure code: fetch prices, compare, bet, log.
+- **Edge is structural, not analytical.** Real money vs. play money creates persistent mispricing.
+- **Massive throughput.** Without Claude API calls, we can scan hundreds of markets per minute.
+- **Perfect for fast-resolution markets.** Sports and daily markets exist on both platforms.
+- **Measurable ground truth.** Track: does betting Manifold toward Polymarket price actually profit? The data will tell us within days.
+
+#### Implementation Steps
+
+1. **`src/polymarket-tool.ts`** — Fetch and parse Polymarket markets from gamma API
+2. **`src/market-matcher.ts`** — Match Polymarket ↔ Manifold questions by keywords
+3. **Update `scan` pipeline** — Add Polymarket oracle as a probability source alongside Claude
+4. **Track oracle performance** — Log polymarket price alongside each bet, measure oracle accuracy vs. Claude accuracy on resolved bets
+5. **Graduate** — Once oracle outperforms Claude on matched markets, make it the default for those categories
+
+#### Polymarket as Training Data
+
+Even on markets without a Manifold match, Polymarket prices serve as calibration:
+- Compare our Claude estimates to Polymarket prices as a "fast Brier score"
+- No need to wait for resolution — Polymarket price is the benchmark
+- Enables daily calibration feedback instead of waiting weeks for resolutions
+
+#### Future: Trading Polymarket Directly
+
+Once we have proven edge and category intelligence:
+- Trade Polymarket directly for real USD returns
+- Use Manifold as the learning/experimentation sandbox
+- Run both simultaneously: Manifold for data, Polymarket for profit
 
 ---
 
 ## Recommended Run Cadences
 
+### Current (Interactive)
+
 | Command | Frequency | Purpose |
 |---------|-----------|---------|
 | `pnpm monitor` | Every 1 hour | Record snapshots, check resolutions, compute drift |
-| `pnpm scan` | Every 6 hours | Find and enter new positions |
+| `pnpm scan` | Every 6 hours | Find and enter new positions (Claude or oracle) |
 | `pnpm sell` | Every 4 hours | Evaluate positions for trimming |
 | `pnpm stats` | On demand | Review calibration and performance |
+
+### Target (Autonomous)
+
+| Layer | Command | Frequency | Purpose |
+|-------|---------|-----------|---------|
+| Hot | `pnpm scan:oracle` | Every 90 min | Oracle-based scan + bet (no LLM) |
+| Hot | `pnpm monitor` | Every 1 hour | Snapshots, resolutions, drift |
+| Hot | `pnpm sell` | Every 4 hours | Position trimming |
+| Warm | `claude --headless` | Daily | Strategy review, param tuning |
+| Cold | `claude --headless` (agent team) | Weekly | Deep audit, codebase improvements |
 
 ---
 
@@ -270,48 +315,141 @@ All append-only JSONL. Linked by `traceId` across files.
 Future additions:
 - `drift.jsonl` — Computed drift scores per position per snapshot
 - `categories.jsonl` — Market category assignments and per-category metrics
+- `polymarket.jsonl` — Polymarket prices at time of each Manifold bet (oracle reference)
+- `daily-reports/` — Natural language daily reports from warm path agent
 
 ---
 
-## Agent Architecture: Claude Code as the Forecaster
+## Autonomous Loop Architecture
 
-### Current: Static Pipeline
+The bot needs to run without human intervention. The key insight: **with a Polymarket oracle, the high-frequency execution path doesn't need an LLM at all.** This changes the architecture from "how do we run Claude autonomously" to "how do we split work between code (fast, cheap) and agents (smart, expensive)."
+
+### Three-Layer Architecture
+
 ```
-search → Claude API (Sonnet, fixed prompt) → Kelly sizing → execute
+┌─────────────────────────────────────────────────────────┐
+│ HOT PATH — every 1-2 hours, pure code, no LLM           │
+│                                                          │
+│  cron → fetch Polymarket prices                         │
+│       → fetch Manifold markets                          │
+│       → match questions                                 │
+│       → compute edge (poly price vs manifold price)     │
+│       → Kelly sizing                                    │
+│       → execute bets                                    │
+│       → record snapshots                                │
+│       → check resolutions                               │
+│       → log everything                                  │
+│                                                          │
+│  No LLM cost. Runs in seconds. Handles 100+ markets.   │
+├─────────────────────────────────────────────────────────┤
+│ WARM PATH — daily, single Claude Code agent              │
+│                                                          │
+│  cron → claude --headless "run daily review"            │
+│       → reviews calibration data from hot path          │
+│       → analyzes non-oracle markets (Claude estimates)  │
+│       → adjusts edge thresholds, bet sizing params      │
+│       → identifies new market categories to explore     │
+│       → generates natural-language performance report   │
+│                                                          │
+│  ~$0.50-2/day. Opus-level reasoning on strategy.        │
+├─────────────────────────────────────────────────────────┤
+│ COLD PATH — weekly, Claude Code agent team               │
+│                                                          │
+│  manual or cron → claude --headless with CLAUDE.md      │
+│       → multi-agent strategy review                     │
+│       → one agent: audit P&L, find systemic biases      │
+│       → one agent: research new market categories       │
+│       → one agent: review + improve codebase            │
+│       → lead agent: synthesize, update config/strategy  │
+│                                                          │
+│  ~$5-10/week. Deep analysis, codebase improvements.     │
+└─────────────────────────────────────────────────────────┘
 ```
-Problems:
-- Anthropic API key dependency (single point of failure)
-- Fixed system prompt can't adapt in real-time
-- Sonnet is less capable than Opus for complex reasoning
-- No context across bets (each call is independent)
 
-### Target: Claude Code as the Agent
+### Hot Path: Cron + Pure Code
+
+The volume play. Runs every 1-2 hours via cron, no human interaction.
+
+**Implementation:**
+```bash
+# crontab
+*/90 * * * * cd ~/manifold-farmer && pnpm scan:oracle >> /tmp/manifold-hot.log 2>&1
+0 * * * *   cd ~/manifold-farmer && pnpm monitor >> /tmp/manifold-monitor.log 2>&1
 ```
-User says "run scan" → Claude Code (Opus) does:
-  1. Fetches markets via Manifold API
-  2. Fetches finance/sports data
-  3. Reads calibration data and past performance
-  4. Reasons about each market with full context
-  5. Applies Kelly sizing
-  6. Places bets and records everything
+
+**What it does:**
+1. Fetches Polymarket markets from gamma API
+2. Fetches Manifold markets (multiple sort orders, keywords)
+3. Matches questions across platforms
+4. For matched markets: uses Polymarket price as probability estimate
+5. For sports markets: uses ESPN/odds data as probability estimate
+6. Computes edge, Kelly sizes, places bets
+7. Records snapshots, checks resolutions, logs everything
+
+**What it does NOT do:**
+- No LLM calls — probability comes from oracle prices and data tools
+- No complex reasoning — just price comparison and math
+- No strategy changes — runs with fixed parameters until warm path adjusts them
+
+### Warm Path: Daily Agent Review
+
+Strategy layer. Runs once per day via `claude --headless`.
+
+**Implementation:**
+```bash
+# crontab — daily at 6 AM
+0 6 * * * cd ~/manifold-farmer && claude --headless -p "Run daily review. Read calibration data, analyze performance, suggest parameter adjustments. Write report to data/daily-reports/" >> /tmp/manifold-warm.log 2>&1
 ```
-Advantages:
-- Opus-level reasoning (better than Sonnet on complex markets)
-- Full context: sees past bets, calibration data, current portfolio
-- Can adapt strategy in real-time based on conversation
-- No separate API key needed
-- Can explain reasoning interactively
 
-### Future: Agent Teams (Experimental)
-When Claude Code agent teams stabilize, consider:
-- **Market Scout**: searches across multiple sort orders, classifies by resolution speed
-- **Analyst**: estimates probabilities with full context and data tools
-- **Portfolio Manager**: monitors positions, computes drift, decides trims
-- **Lead**: coordinates the team, synthesizes findings, makes final calls
+**What it does:**
+1. Reads all JSONL data (decisions, trades, resolutions, snapshots)
+2. Computes calibration metrics, drift analysis, category performance
+3. Identifies markets where no oracle exists — applies Opus-level reasoning
+4. Adjusts parameters: edge thresholds, max bet sizes, category weights
+5. Writes config changes and natural-language report
 
-Agent teams are best for development sprints (improving the codebase in parallel) rather than runtime execution. For runtime, the single-agent approach (Claude Code as forecaster) is more practical and cost-effective.
+**Key value:** The warm path catches things code can't:
+- "Sports markets are 2x more profitable than politics — increase sports allocation"
+- "Our edge threshold of 5% is too aggressive — losses on thin-edge bets are dragging ROI"
+- "New market category 'AI releases' has no oracle match but Claude estimates are 70% accurate — keep betting"
 
-### Run Modes
-1. **Interactive** (current): User asks Claude Code to "run scan" / "run monitor" / "run sell"
-2. **Semi-autonomous**: Claude Code runs the full cycle on request, reports results, asks for approval before executing
-3. **Autonomous** (future): Scheduled execution via cron calling Claude Code headless, with human review of decisions log
+### Cold Path: Weekly Agent Team
+
+Deep strategy review. Runs weekly, potentially with Claude Code agent teams.
+
+**Agent roles:**
+| Agent | Task |
+|-------|------|
+| **Auditor** | Deep-dive into P&L. Find systemic biases, losing patterns, category-level issues. |
+| **Scout** | Research new market categories, new data sources, new oracle opportunities. |
+| **Engineer** | Review and improve codebase — new features, bug fixes, performance. |
+| **Lead** | Synthesize findings from all agents. Update ROADMAP.md, strategy params, priorities. |
+
+**Implementation with Claude Code agent teams:**
+```bash
+claude --headless -p "Weekly strategy review. Coordinate with subagents to audit performance, scout new opportunities, and improve the codebase." --allowedTools "Task,Read,Write,Edit,Bash,Glob,Grep"
+```
+
+Agent teams are best suited here because:
+- The work is parallelizable (audit, scout, engineer can work independently)
+- Each agent needs deep context in its domain
+- The lead synthesizes across domains — a natural coordinator role
+- Weekly cadence means the cost (~$5-10) is justified by the depth of analysis
+
+### Migration Path
+
+| Phase | Execution | When |
+|-------|-----------|------|
+| **Now** | Interactive: user tells Claude Code what to do | Current |
+| **Phase 6** | Hot path: cron runs oracle-based scan + monitor | After Polymarket oracle works |
+| **Phase 7** | Warm path: daily `claude --headless` reviews | After 100+ oracle-based resolutions |
+| **Phase 8** | Cold path: weekly agent team strategy review | After warm path proves value |
+
+### Why Not Full-Agent Autonomous?
+
+Running Claude for every bet decision is:
+- **Expensive**: ~$0.05-0.15 per market analysis × 200 markets/scan × 6 scans/day = $60-180/day
+- **Slow**: Each Claude call takes 5-30 seconds, serial bottleneck
+- **Unnecessary**: With a Polymarket oracle, the estimate is already available for free
+
+The three-layer approach uses Claude where it adds value (strategy, reasoning about novel markets, codebase improvement) and pure code where it doesn't (price comparison, bet execution, data recording).
