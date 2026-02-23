@@ -1,6 +1,12 @@
 node_modules/
 .env
+.env.*
+.env.local
+.env.production
 data/
 dist/
 src/*.js
 .DS_Store
+*.log
+coverage/
+*.tgz
