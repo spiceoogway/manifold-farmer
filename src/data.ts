@@ -7,6 +7,7 @@ const DATA_DIR = join(__dirname, "..", "data");
 export const DECISIONS_FILE = join(DATA_DIR, "decisions.jsonl");
 export const TRADES_FILE = join(DATA_DIR, "trades.jsonl");
 export const RESOLUTIONS_FILE = join(DATA_DIR, "resolutions.jsonl");
+export const SNAPSHOTS_FILE = join(DATA_DIR, "snapshots.jsonl");
 
 mkdirSync(DATA_DIR, { recursive: true });
 

@@ -78,15 +78,30 @@ export interface TradeExecution {
   estimate: number;
   edge: number;
   dryRun: boolean;
+  shares?: number; // actual shares received (for fill-price calculation)
   result?: {
     betId?: string;
     error?: string;
   };
 }
 
+export interface PositionSnapshot {
+  timestamp: string;
+  traceId: string;
+  marketId: string;
+  question: string;
+  direction: "YES" | "NO";
+  amount: number;
+  estimate: number;
+  entryProb: number;
+  currentProb: number;
+  unrealizedPnl: number;
+}
+
 export interface BetResponse {
   betId: string;
-  // Manifold returns more fields, but we only need the ID
+  shares: number;
+  // Manifold returns more fields; we track shares for fill-price calculation
 }
 
 export interface Resolution {

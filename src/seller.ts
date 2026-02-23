@@ -15,7 +15,8 @@ interface Position {
   question: string;
   direction: "YES" | "NO";
   amount: number;
-  entryProb: number;
+  shares?: number; // actual shares received — enables accurate fill-price P&L
+  entryProb: number; // fallback when shares not available
   estimate: number;
   edge: number;
 }
@@ -47,6 +48,7 @@ function getOpenPositions(apiKey: string): Position[] {
       question: t.question,
       direction: t.direction,
       amount: t.amount,
+      shares: t.shares,
       entryProb: t.marketProb,
       estimate: t.estimate,
       edge: t.edge,
@@ -83,12 +85,24 @@ export async function runSell(config: Config): Promise<void> {
       let unrealizedPnl: number;
       let maxPayout: number;
 
-      if (pos.direction === "YES") {
-        unrealizedPnl = pos.amount * (currentProb - pos.entryProb) / pos.entryProb;
-        maxPayout = pos.amount * (1 - pos.entryProb) / pos.entryProb;
+      if (pos.shares) {
+        // Actual fill price: amount/shares per share
+        if (pos.direction === "YES") {
+          unrealizedPnl = pos.shares * currentProb - pos.amount;
+          maxPayout = pos.shares - pos.amount; // if market goes to 100%
+        } else {
+          unrealizedPnl = pos.shares * (1 - currentProb) - pos.amount;
+          maxPayout = pos.shares - pos.amount; // if market goes to 0%
+        }
       } else {
-        unrealizedPnl = pos.amount * (pos.entryProb - currentProb) / (1 - pos.entryProb);
-        maxPayout = pos.amount * pos.entryProb / (1 - pos.entryProb);
+        // Fallback: approximate using market prob at bet time as fill price
+        if (pos.direction === "YES") {
+          unrealizedPnl = pos.amount * (currentProb - pos.entryProb) / pos.entryProb;
+          maxPayout = pos.amount * (1 - pos.entryProb) / pos.entryProb;
+        } else {
+          unrealizedPnl = pos.amount * (pos.entryProb - currentProb) / (1 - pos.entryProb);
+          maxPayout = pos.amount * pos.entryProb / (1 - pos.entryProb);
+        }
       }
 
       const payoutRatio = maxPayout > 0 ? unrealizedPnl / maxPayout : 0;

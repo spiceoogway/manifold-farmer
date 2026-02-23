@@ -5,21 +5,72 @@ import { isSportsMarket } from "./sports-tool.js";
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const NINETY_DAYS_MS = 90 * 24 * ONE_HOUR_MS;
+const SEVEN_DAYS_MS = 7 * 24 * ONE_HOUR_MS;
+
+// Patterns that indicate a market resolves quickly (hours to days)
+const FAST_RESOLUTION_PATTERNS: RegExp[] = [
+  /\bNBA\b.*beat/i,
+  /\bNHL\b.*beat/i,
+  /\bNFL\b.*beat|win/i,
+  /\bMLB\b.*beat/i,
+  /\bUFC\b/i,
+  /\bstock.*close|close.*stock|stock.*price.*(?:on|by)\b/i,
+  /\bcoin\s?flip/i,
+  /\bdaily\b/i,
+  /\bby (?:end of |eod |EOD)?\w+ \d{1,2}(?:st|nd|rd|th)?\b/i,   // "by Feb 28th"
+  /\bbefore (?:end of )?\w+ \d{1,2}/i,                             // "before March 1"
+  /\bearning|revenue|eps\b.*(?:Q[1-4]|quarter)/i,                  // earnings reports
+  /\bgold\b.*(?:above|below|end of)/i,                             // commodity targets
+];
 
 /**
- * Filter markets suitable for analysis.
+ * Score how quickly a market is likely to resolve.
+ * Higher score = faster resolution = better for training loop.
+ *
+ * Factors:
+ * - Close time proximity (closer = faster resolution)
+ * - Pattern matching (sports, daily, earnings = fast)
+ * - Bettor count (more bettors on short markets = more liquid)
+ */
+export function resolutionSpeedScore(market: ManifoldMarket): number {
+  const now = Date.now();
+  const timeToClose = market.closeTime - now;
+
+  // Base score from time to close (0-50 points)
+  // Markets closing within 7 days get max score, decays linearly to 0 at 90 days
+  let timeScore = 0;
+  if (timeToClose <= SEVEN_DAYS_MS) {
+    timeScore = 50;
+  } else if (timeToClose <= NINETY_DAYS_MS) {
+    timeScore = 50 * (1 - (timeToClose - SEVEN_DAYS_MS) / (NINETY_DAYS_MS - SEVEN_DAYS_MS));
+  }
+
+  // Pattern bonus (0-30 points) for markets with predictable resolution dates
+  const patternMatch = FAST_RESOLUTION_PATTERNS.some((p) => p.test(market.question));
+  const patternScore = patternMatch ? 30 : 0;
+
+  // Liquidity score (0-20 points) — prefer markets with enough liquidity to bet meaningfully
+  const liqScore = Math.min(20, (market.totalLiquidity / 5000) * 20);
+
+  return timeScore + patternScore + liqScore;
+}
+
+/**
+ * Filter markets suitable for analysis, sorted by resolution speed.
  * - Binary CPMM markets only
  * - Liquidity above threshold
  * - Closes between 1 hour and 90 days from now
  * - Has at least 1 bettor
  * - Not already resolved
+ *
+ * Returns results sorted by resolution speed (fastest first).
  */
 export function filterMarkets(
   markets: ManifoldMarket[],
   config: Config
 ): ManifoldMarket[] {
   const now = Date.now();
-  return markets.filter((m) => {
+  const filtered = markets.filter((m) => {
     if (m.outcomeType !== "BINARY") return false;
     if (m.isResolved) return false;
     if (m.totalLiquidity < config.minLiquidity) return false;
@@ -32,6 +83,9 @@ export function filterMarkets(
 
     return true;
   });
+
+  // Sort by resolution speed score (highest first)
+  return filtered.sort((a, b) => resolutionSpeedScore(b) - resolutionSpeedScore(a));
 }
 
 /**

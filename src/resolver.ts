@@ -1,7 +1,7 @@
-import type { TradeDecision, TradeExecution, Resolution } from "./types.js";
+import type { TradeDecision, TradeExecution, Resolution, PositionSnapshot } from "./types.js";
 import { readJsonl, DECISIONS_FILE, TRADES_FILE, RESOLUTIONS_FILE } from "./data.js";
 import { getMarket } from "./manifold.js";
-import { logResolution, logInfo } from "./logger.js";
+import { logResolution, logSnapshot, logInfo } from "./logger.js";
 
 export async function runResolve(apiKey: string): Promise<void> {
   const trades = readJsonl<TradeExecution>(TRADES_FILE);
@@ -74,7 +74,9 @@ export async function runResolve(apiKey: string): Promise<void> {
         trade.amount,
         trade.marketProb,
         resolution,
-        won
+        won,
+        trade.shares,
+        market.resolutionProbability
       );
       const brierScore = (trade.estimate - actual) ** 2;
 
@@ -109,6 +111,9 @@ export async function runResolve(apiKey: string): Promise<void> {
   }
 
   logInfo(`\nResolved: ${resolved} | Still pending: ${skipped}`);
+
+  // Record mid-market snapshots for all remaining open positions
+  await recordSnapshots(apiKey);
 }
 
 function computeWon(
@@ -127,17 +132,92 @@ function computePnl(
   amount: number,
   marketProb: number,
   resolution: "YES" | "NO" | "MKT",
-  won: boolean
+  won: boolean,
+  shares?: number,
+  resolutionProbability?: number
 ): number {
-  // For MKT resolution, approximate based on resolution probability
   if (resolution === "MKT") {
-    // Simplified: treat as partial win/loss
-    return won ? amount * 0.1 : -amount * 0.1;
+    const p = resolutionProbability ?? 0.5;
+    if (shares) {
+      // Exact: shares × resolution value − cost
+      return direction === "YES"
+        ? shares * p - amount
+        : shares * (1 - p) - amount;
+    }
+    // Fallback: approximate using market prob as fill price
+    return direction === "YES"
+      ? amount * (p - marketProb) / marketProb
+      : amount * (marketProb - p) / (1 - marketProb);
   }
 
+  // Binary YES/NO resolution
+  if (shares) {
+    // Exact: won shares pay $1 each, lost shares pay $0
+    return won ? shares - amount : -amount;
+  }
+  // Fallback: approximate
   if (direction === "YES") {
     return won ? amount * (1 - marketProb) / marketProb : -amount;
   } else {
     return won ? amount * marketProb / (1 - marketProb) : -amount;
   }
+}
+
+/**
+ * Record a mid-market snapshot for every open position.
+ * Gives us mark-to-market calibration data between entry and resolution.
+ */
+async function recordSnapshots(apiKey: string): Promise<void> {
+  const trades = readJsonl<TradeExecution>(TRADES_FILE);
+  const resolutions = readJsonl<Resolution>(RESOLUTIONS_FILE);
+  const resolvedIds = new Set(resolutions.map((r) => r.traceId));
+
+  const openTrades = trades.filter(
+    (t) => !t.dryRun && t.result?.betId && !t.result.error && !resolvedIds.has(t.traceId)
+  );
+
+  if (openTrades.length === 0) return;
+
+  logInfo(`\nRecording snapshots for ${openTrades.length} open positions...`);
+  let recorded = 0;
+
+  for (const trade of openTrades) {
+    try {
+      const market = await getMarket(apiKey, trade.marketId);
+      if (market.isResolved) continue; // just resolved, skip snapshot
+
+      const currentProb = market.probability;
+      let unrealizedPnl: number;
+
+      if (trade.shares) {
+        unrealizedPnl = trade.direction === "YES"
+          ? trade.shares * currentProb - trade.amount
+          : trade.shares * (1 - currentProb) - trade.amount;
+      } else {
+        unrealizedPnl = trade.direction === "YES"
+          ? trade.amount * (currentProb - trade.marketProb) / trade.marketProb
+          : trade.amount * (trade.marketProb - currentProb) / (1 - trade.marketProb);
+      }
+
+      const snapshot: PositionSnapshot = {
+        timestamp: new Date().toISOString(),
+        traceId: trade.traceId,
+        marketId: trade.marketId,
+        question: trade.question,
+        direction: trade.direction,
+        amount: trade.amount,
+        estimate: trade.estimate,
+        entryProb: trade.marketProb,
+        currentProb,
+        unrealizedPnl,
+      };
+
+      logSnapshot(snapshot);
+      recorded++;
+    } catch {
+      // Non-critical — skip silently
+    }
+  }
+
+  logInfo(`Recorded ${recorded} snapshots.`);
 }

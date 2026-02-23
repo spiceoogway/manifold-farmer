@@ -37,6 +37,7 @@ export async function executeBets(
           decision.betAmount
         );
         execution.result = { betId: result.betId };
+        execution.shares = result.shares;
         logInfo(
           `Placed M$${decision.betAmount} on ${decision.direction} — ${decision.question.slice(0, 60)} (bet: ${result.betId})`
         );

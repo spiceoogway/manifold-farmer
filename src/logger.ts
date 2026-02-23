@@ -1,6 +1,6 @@
 import { appendFileSync } from "fs";
-import { DECISIONS_FILE, TRADES_FILE, RESOLUTIONS_FILE } from "./data.js";
-import type { TradeDecision, TradeExecution, Resolution } from "./types.js";
+import { DECISIONS_FILE, TRADES_FILE, RESOLUTIONS_FILE, SNAPSHOTS_FILE } from "./data.js";
+import type { TradeDecision, TradeExecution, Resolution, PositionSnapshot } from "./types.js";
 
 function appendJsonl(file: string, data: unknown): void {
   appendFileSync(file, JSON.stringify(data) + "\n");
@@ -32,6 +32,10 @@ export function logTrade(trade: TradeExecution): void {
 
 export function logResolution(resolution: Resolution): void {
   appendJsonl(RESOLUTIONS_FILE, resolution);
+}
+
+export function logSnapshot(snapshot: PositionSnapshot): void {
+  appendJsonl(SNAPSHOTS_FILE, snapshot);
 }
 
 export function logInfo(msg: string): void {

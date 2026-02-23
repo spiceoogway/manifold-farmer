@@ -4,12 +4,12 @@ import { estimateProbability } from "./analyzer.js";
 import { filterMarkets, makeDecision } from "./strategy.js";
 import { executeBets } from "./executor.js";
 import { logDecision, logInfo, logError } from "./logger.js";
-import { readJsonl, RESOLUTIONS_FILE } from "./data.js";
+import { readJsonl, RESOLUTIONS_FILE, TRADES_FILE, SNAPSHOTS_FILE } from "./data.js";
 import { runResolve } from "./resolver.js";
 import { computeCalibration } from "./calibration.js";
 import { formatFeedback } from "./feedback.js";
 import { runSell } from "./seller.js";
-import type { TradeDecision, Resolution } from "./types.js";
+import type { TradeDecision, TradeExecution, Resolution, PositionSnapshot } from "./types.js";
 
 async function runScan() {
   const config = loadConfig();
@@ -38,12 +38,26 @@ async function runScan() {
     process.exit(1);
   }
 
+  // Build set of market IDs we already hold positions in
+  const allTrades = readJsonl<TradeExecution>(TRADES_FILE);
+  const allResolutions = readJsonl<Resolution>(RESOLUTIONS_FILE);
+  const resolvedTraceIds = new Set(allResolutions.map((r) => r.traceId));
+  const heldMarketIds = new Set(
+    allTrades
+      .filter((t) => !t.dryRun && !t.result?.error && !resolvedTraceIds.has(t.traceId))
+      .map((t) => t.marketId)
+  );
+  if (heldMarketIds.size > 0) {
+    logInfo(`Skipping ${heldMarketIds.size} markets with existing positions`);
+  }
+
   logInfo("Searching for markets...");
   const rawMarkets = await searchMarkets(config.manifoldApiKey, 50);
   logInfo(`Fetched ${rawMarkets.length} markets`);
 
-  const candidates = filterMarkets(rawMarkets, config);
-  logInfo(`${candidates.length} markets pass filters`);
+  const candidates = filterMarkets(rawMarkets, config)
+    .filter((m) => !heldMarketIds.has(m.id));
+  logInfo(`${candidates.length} markets pass filters (excl. held positions)`);
 
   const toAnalyze = candidates.slice(0, config.maxMarketsPerRun);
   logInfo(`Analyzing ${toAnalyze.length} markets with Claude...\n`);
@@ -166,6 +180,83 @@ async function runSellCmd() {
   logInfo("Done.");
 }
 
+async function runMonitor() {
+  const config = loadConfig();
+  logInfo("Hourly monitor cycle...");
+
+  // 1. Check resolutions + record snapshots
+  await runResolve(config.manifoldApiKey);
+
+  // 2. Compute drift metrics from snapshots
+  const snapshots = readJsonl<PositionSnapshot>(SNAPSHOTS_FILE);
+  const trades = readJsonl<TradeExecution>(TRADES_FILE);
+  const resolutions = readJsonl<Resolution>(RESOLUTIONS_FILE);
+  const resolvedIds = new Set(resolutions.map((r) => r.traceId));
+
+  // Get currently open trade IDs
+  const openTrades = trades.filter(
+    (t) => !t.dryRun && t.result?.betId && !t.result.error && !resolvedIds.has(t.traceId)
+  );
+
+  if (openTrades.length === 0) {
+    logInfo("No open positions to monitor.");
+    return;
+  }
+
+  // For each open position, compute drift from latest snapshot
+  const tradeMap = new Map(openTrades.map((t) => [t.traceId, t]));
+
+  // Group snapshots by traceId, take the most recent
+  const latestSnapshots = new Map<string, PositionSnapshot>();
+  for (const s of snapshots) {
+    if (!tradeMap.has(s.traceId)) continue;
+    const existing = latestSnapshots.get(s.traceId);
+    if (!existing || s.timestamp > existing.timestamp) {
+      latestSnapshots.set(s.traceId, s);
+    }
+  }
+
+  let totalUnrealizedPnl = 0;
+  let positveDrift = 0;
+  let totalDrift = 0;
+
+  console.log(`\n=== Portfolio Monitor (${openTrades.length} positions) ===\n`);
+
+  for (const trade of openTrades) {
+    const snap = latestSnapshots.get(trade.traceId);
+    if (!snap) continue;
+
+    // Drift: did market move toward our position?
+    const dirSign = trade.direction === "YES" ? 1 : -1;
+    const drift = (snap.currentProb - trade.marketProb) * dirSign;
+
+    totalUnrealizedPnl += snap.unrealizedPnl;
+    totalDrift++;
+    if (drift > 0) positveDrift++;
+
+    const driftStr = drift >= 0 ? "+" : "";
+    const pnlStr = snap.unrealizedPnl >= 0 ? `+M$${snap.unrealizedPnl.toFixed(1)}` : `M$${snap.unrealizedPnl.toFixed(1)}`;
+    console.log(
+      `  ${trade.direction} ${trade.question.slice(0, 50)} | ${pnlStr} | drift: ${driftStr}${(drift * 100).toFixed(1)}pts`
+    );
+  }
+
+  const agreementRate = totalDrift > 0 ? positveDrift / totalDrift : 0;
+  const totalPnlStr = totalUnrealizedPnl >= 0 ? `+M$${totalUnrealizedPnl.toFixed(1)}` : `M$${totalUnrealizedPnl.toFixed(1)}`;
+
+  console.log(`\n  --- Aggregate ---`);
+  console.log(`  Unrealized P&L: ${totalPnlStr}`);
+  console.log(`  Drift agreement: ${(agreementRate * 100).toFixed(0)}% (${positveDrift}/${totalDrift} positions moving our way)`);
+
+  if (totalDrift >= 5 && agreementRate < 0.4) {
+    console.log(`  WARNING: Markets consistently moving against estimates. Consider being less contrarian.`);
+  } else if (totalDrift >= 5 && agreementRate > 0.7) {
+    console.log(`  Strong signal: markets confirming estimates.`);
+  }
+
+  console.log("");
+}
+
 const command = process.argv[2] || "scan";
 
 switch (command) {
@@ -187,10 +278,16 @@ switch (command) {
       process.exit(1);
     });
     break;
+  case "monitor":
+    runMonitor().catch((err) => {
+      logError(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    });
+    break;
   case "stats":
     runStats();
     break;
   default:
-    logError(`Unknown command: ${command}. Use: scan, resolve, sell, stats`);
+    logError(`Unknown command: ${command}. Use: scan, resolve, sell, monitor, stats`);
     process.exit(1);
 }
