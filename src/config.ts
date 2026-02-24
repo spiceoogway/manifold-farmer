@@ -47,7 +47,7 @@ function envBool(key: string, fallback: boolean): boolean {
 
 export function loadConfig(): Config {
   return {
-    manifoldApiKey: requireEnv("MANIFOLD_API_KEY"),
+    manifoldApiKey: process.env.MANIFOLD_API_KEY || "",
     anthropicApiKey: requireEnv("ANTHROPIC_API_KEY"),
     dryRun: envBool("DRY_RUN", true),
     edgeThreshold: envFloatRange("EDGE_THRESHOLD", 0.1, 0, 1),
@@ -57,5 +57,13 @@ export function loadConfig(): Config {
     minLiquidity: envIntMin("MIN_LIQUIDITY", 100, 0),
     maxMarketsPerRun: envIntMin("MAX_MARKETS_PER_RUN", 20, 1),
     claudeModel: process.env.CLAUDE_MODEL || "claude-sonnet-4-20250514",
+    // Polymarket
+    polyPrivateKey: process.env.POLY_PRIVATE_KEY || undefined,
+    polyFunderAddress: process.env.POLY_FUNDER_ADDRESS || undefined,
+    polySignatureType: envInt("POLY_SIGNATURE_TYPE", 0),
+    polyMinVolume24hr: envIntMin("POLY_MIN_VOLUME_24HR", 1000, 0),
+    polyMinLiquidity: envIntMin("POLY_MIN_LIQUIDITY", 5000, 0),
+    polyMaxMarketsPerRun: envIntMin("POLY_MAX_MARKETS_PER_RUN", 20, 1),
+    polyMaxBetAmount: envIntMin("POLY_MAX_BET_AMOUNT", 25, 1),
   };
 }

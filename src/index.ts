@@ -1,7 +1,7 @@
 import { loadConfig } from "./config.js";
 import { getMe, searchMarkets, getMarket } from "./manifold.js";
 import { estimateProbability } from "./analyzer.js";
-import { filterMarkets, makeDecision } from "./strategy.js";
+import { filterMarkets, makeDecision, polyToManifoldLike } from "./strategy.js";
 import { executeBets } from "./executor.js";
 import { logDecision, logInfo, logError } from "./logger.js";
 import { readJsonl, RESOLUTIONS_FILE, TRADES_FILE, SNAPSHOTS_FILE } from "./data.js";
@@ -9,7 +9,89 @@ import { runResolve } from "./resolver.js";
 import { computeCalibration } from "./calibration.js";
 import { formatFeedback } from "./feedback.js";
 import { runSell } from "./seller.js";
+import { fetchPolymarketMarkets, filterPolymarketMarkets, enrichWithEffectivePrices } from "./polymarket.js";
 import type { TradeDecision, TradeExecution, Resolution, PositionSnapshot } from "./types.js";
+
+async function runPolyScan() {
+  const config = loadConfig();
+  logInfo(`Polymarket scan — ${config.dryRun ? "DRY RUN" : "LIVE"}`);
+  logInfo(`Model: ${config.claudeModel}`);
+  logInfo(`Edge threshold: ${(config.edgeThreshold * 100).toFixed(0)}%`);
+
+  // Load calibration feedback
+  let calibrationFeedback: string | undefined;
+  const resolutions = readJsonl<Resolution>(RESOLUTIONS_FILE);
+  if (resolutions.length > 0) {
+    const report = computeCalibration(resolutions);
+    const feedback = formatFeedback(report);
+    if (feedback) {
+      calibrationFeedback = feedback;
+      logInfo(`Loaded calibration feedback from ${resolutions.length} resolved bets`);
+    }
+  }
+
+  // 1. Fetch and filter Polymarket markets
+  logInfo("Fetching Polymarket markets...");
+  const polyMarkets = await fetchPolymarketMarkets(config);
+  const filtered = filterPolymarketMarkets(polyMarkets);
+  logInfo(`Fetched ${polyMarkets.length} markets, ${filtered.length} pass filters`);
+
+  // 2. Exclude already-held positions
+  const allTrades = readJsonl<TradeExecution>(TRADES_FILE);
+  const resolvedTraceIds = new Set(resolutions.map(r => r.traceId));
+  const heldConditionIds = new Set(
+    allTrades
+      .filter(t => t.venue === "polymarket" && !t.dryRun && !t.result?.error && !resolvedTraceIds.has(t.traceId))
+      .map(t => t.marketId)
+  );
+  const candidates = filtered.filter(m => !heldConditionIds.has(m.conditionId));
+  if (heldConditionIds.size > 0) {
+    logInfo(`Skipping ${heldConditionIds.size} markets with existing positions`);
+  }
+
+  // 3. Enrich with effective fill prices from CLOB orderbooks
+  const preCandidates = candidates.slice(0, config.polyMaxMarketsPerRun * 2);
+  logInfo(`Fetching orderbook depth for ${preCandidates.length} markets...`);
+  const priced = await enrichWithEffectivePrices(preCandidates, config.polyMaxBetAmount);
+  const toAnalyze = priced.slice(0, config.polyMaxMarketsPerRun);
+  logInfo(`${priced.length}/${preCandidates.length} markets have fillable depth — analyzing ${toAnalyze.length} with Claude...\n`);
+
+  const decisions: TradeDecision[] = [];
+  const bankroll = config.polyMaxBetAmount * 10;
+
+  for (const poly of toAnalyze) {
+    try {
+      const marketLike = polyToManifoldLike(poly);
+      const estimate = await estimateProbability(config, marketLike, calibrationFeedback);
+      const decision = makeDecision(marketLike, estimate, bankroll, config, { venue: "polymarket" });
+
+      // Attach Polymarket-specific fields
+      decision.polyTokenId = decision.direction === "YES" ? poly.yesTokenId : poly.noTokenId;
+
+      logDecision(decision);
+      decisions.push(decision);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logError(`Failed to analyze ${poly.question.slice(0, 60)}: ${msg}`);
+    }
+  }
+
+  // 4. Execute
+  const bets = decisions.filter(d => d.action === "BET");
+  logInfo(`\n--- Summary ---`);
+  logInfo(`Analyzed: ${decisions.length}`);
+  logInfo(`Bets identified: ${bets.length}`);
+
+  if (bets.length > 0) {
+    const executions = await executeBets(decisions, config);
+    const ok = executions.filter(e => !e.result?.error);
+    logInfo(`Bets executed: ${ok.length}/${executions.length}`);
+  } else {
+    logInfo("No bets to place this run.");
+  }
+
+  logInfo("Done.");
+}
 
 async function runScan() {
   const config = loadConfig();
@@ -88,6 +170,7 @@ async function runScan() {
         edge: 0,
         direction: null,
         kellyFraction: 0,
+        venue: "manifold",
         effectiveProb: lite.probability,
         betAmount: 0,
         action: "SKIP_ERROR",
@@ -287,7 +370,13 @@ switch (command) {
   case "stats":
     runStats();
     break;
+  case "poly:scan":
+    runPolyScan().catch((err) => {
+      logError(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    });
+    break;
   default:
-    logError(`Unknown command: ${command}. Use: scan, resolve, sell, monitor, stats`);
+    logError(`Unknown command: ${command}. Use: scan, resolve, sell, monitor, stats, poly:scan`);
     process.exit(1);
 }

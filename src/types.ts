@@ -9,6 +9,14 @@ export interface Config {
   minLiquidity: number;
   maxMarketsPerRun: number;
   claudeModel: string;
+  // Polymarket
+  polyPrivateKey?: string;
+  polyFunderAddress?: string;
+  polySignatureType: number;
+  polyMinVolume24hr: number;
+  polyMinLiquidity: number;
+  polyMaxMarketsPerRun: number;
+  polyMaxBetAmount: number;
 }
 
 export interface ManifoldUser {
@@ -60,6 +68,8 @@ export interface TradeDecision {
   effectiveProb: number;
   betAmount: number;
   action: "BET" | "SKIP_LOW_EDGE" | "SKIP_NEGATIVE_KELLY" | "SKIP_LOW_CONFIDENCE" | "SKIP_ERROR";
+  venue: "manifold" | "polymarket";
+  polyTokenId?: string;
   // Market context at decision time
   liquidity: number;
   closeTime: string;
@@ -78,9 +88,12 @@ export interface TradeExecution {
   estimate: number;
   edge: number;
   dryRun: boolean;
+  venue: "manifold" | "polymarket";
+  polyTokenId?: string;
   shares?: number; // actual shares received (for fill-price calculation)
   result?: {
     betId?: string;
+    orderId?: string;
     error?: string;
   };
 }
@@ -119,6 +132,7 @@ export interface Resolution {
   won: boolean;
   pnl: number;
   brierScore: number;
+  venue: "manifold" | "polymarket";
 }
 
 export interface CalibrationBucket {

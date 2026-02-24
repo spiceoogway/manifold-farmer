@@ -55,6 +55,7 @@ export async function runResolve(apiKey: string): Promise<void> {
           won: false,
           pnl: 0,
           brierScore: 0,
+          venue: trade.venue ?? "manifold",
         };
         logResolution(res);
         resolved++;
@@ -95,6 +96,7 @@ export async function runResolve(apiKey: string): Promise<void> {
         won,
         pnl,
         brierScore,
+        venue: trade.venue ?? "manifold",
       };
 
       logResolution(res);

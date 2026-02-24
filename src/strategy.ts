@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import type { Config, ManifoldMarket, ClaudeEstimate, TradeDecision } from "./types.js";
+import type { PolymarketMarket } from "./polymarket.js";
 import { isFinanceMarket } from "./finance-tool.js";
 import { isSportsMarket } from "./sports-tool.js";
 
@@ -205,14 +206,37 @@ function sizeBetWithSlippage(
 }
 
 /**
+ * Convert a Polymarket market to the ManifoldMarket shape for reuse in makeDecision/analyzer.
+ */
+export function polyToManifoldLike(poly: PolymarketMarket): ManifoldMarket {
+  return {
+    id: poly.conditionId,
+    question: poly.question,
+    url: `https://polymarket.com/event/${poly.slug}`,
+    probability: poly.yesPrice,
+    totalLiquidity: poly.liquidity,
+    volume: poly.volume24hr,
+    closeTime: poly.endDate.getTime(),
+    createdTime: 0,
+    outcomeType: "BINARY",
+    mechanism: "clob",
+    isResolved: false,
+    creatorUsername: "polymarket",
+    uniqueBettorCount: 0,
+  };
+}
+
+/**
  * Analyze a market and produce a trade decision.
  */
 export function makeDecision(
   market: ManifoldMarket,
   estimate: ClaudeEstimate,
   bankroll: number,
-  config: Config
+  config: Config,
+  options?: { venue?: "manifold" | "polymarket" }
 ): TradeDecision {
+  const venue = options?.venue ?? "manifold";
   const edge = calculateEdge(estimate.probability, market.probability);
   const traceId = randomUUID();
 
@@ -232,6 +256,7 @@ export function makeDecision(
     confidence: estimate.confidence,
     reasoning: estimate.reasoning,
     edge,
+    venue,
     liquidity: market.totalLiquidity,
     closeTime: new Date(market.closeTime).toISOString(),
     uniqueBettorCount: market.uniqueBettorCount ?? 0,
@@ -265,14 +290,32 @@ export function makeDecision(
   }
 
   const direction = getDirection(estimate.probability, market.probability);
-  const { betAmount, kellyFrac, effectiveProb } = sizeBetWithSlippage(
-    estimate.probability,
-    market.probability,
-    direction,
-    bankroll,
-    market.totalLiquidity,
-    config
-  );
+
+  let betAmount: number;
+  let kellyFrac: number;
+  let effectiveProb: number;
+
+  if (venue === "polymarket") {
+    // CLOB: no AMM slippage — plain Kelly sizing
+    kellyFrac = kellyFraction(estimate.probability, market.probability, direction);
+    effectiveProb = market.probability;
+    betAmount = kellyFrac > 0 ? sizeBet(kellyFrac, bankroll, config) : 0;
+    // Apply Polymarket-specific cap
+    betAmount = Math.min(betAmount, config.polyMaxBetAmount);
+  } else {
+    // AMM: iterative Kelly with slippage
+    const result = sizeBetWithSlippage(
+      estimate.probability,
+      market.probability,
+      direction,
+      bankroll,
+      market.totalLiquidity,
+      config
+    );
+    betAmount = result.betAmount;
+    kellyFrac = result.kellyFrac;
+    effectiveProb = result.effectiveProb;
+  }
 
   if (kellyFrac <= 0) {
     return {
