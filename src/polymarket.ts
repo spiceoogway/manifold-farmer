@@ -1,6 +1,6 @@
 import { ClobClient, Side, OrderType, Chain } from "@polymarket/clob-client";
 import type { ApiKeyCreds } from "@polymarket/clob-client";
-import { Wallet } from "ethers";
+import { ethers, Wallet } from "ethers";
 import type { Config } from "./types.js";
 
 // === Types ===
@@ -287,6 +287,51 @@ export async function placePolyOrder(
 
     // FOK order may not fill — that's expected
     return { orderId: result?.orderID ?? "no-fill", status: result?.status ?? "no-fill" };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { error: msg };
+  }
+}
+
+// === CTF Redemption ===
+
+// Polygon mainnet addresses — from @polymarket/clob-client config.js
+const POLYGON_RPC = "https://polygon-rpc.com";
+const CTF_ADDRESS    = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045";
+const USDC_ADDRESS   = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
+const NULL_PARENT    = "0x0000000000000000000000000000000000000000000000000000000000000000";
+
+const CTF_REDEEM_ABI = [
+  "function redeemPositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256[] calldata indexSets) external",
+];
+
+/**
+ * Redeem winning conditional tokens for a resolved market.
+ * Calls redeemPositions([1, 2]) — both YES and NO indexSets — so it works
+ * regardless of which side was bet. Losing tokens return $0; winning tokens
+ * return $1 each in USDC. Requires MATIC for gas (~$0.01).
+ */
+export async function redeemPolyPosition(
+  config: Config,
+  conditionId: string,
+): Promise<{ txHash: string } | { error: string }> {
+  if (!config.polyPrivateKey) {
+    return { error: "POLY_PRIVATE_KEY required for redemption" };
+  }
+
+  try {
+    const provider = new ethers.providers.JsonRpcProvider(POLYGON_RPC);
+    const wallet = new Wallet(config.polyPrivateKey, provider);
+    const ctf = new ethers.Contract(CTF_ADDRESS, CTF_REDEEM_ABI, wallet);
+
+    const tx = await ctf.redeemPositions(
+      USDC_ADDRESS,
+      NULL_PARENT,
+      conditionId,
+      [1, 2], // YES indexSet=1, NO indexSet=2
+    );
+    await tx.wait();
+    return { txHash: tx.hash };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { error: msg };

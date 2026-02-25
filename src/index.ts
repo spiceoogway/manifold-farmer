@@ -9,7 +9,8 @@ import { runResolve } from "./resolver.js";
 import { computeCalibration } from "./calibration.js";
 import { formatFeedback } from "./feedback.js";
 import { runSell } from "./seller.js";
-import { fetchPolymarketMarkets, filterPolymarketMarkets, enrichWithEffectivePrices } from "./polymarket.js";
+import { fetchPolymarketMarkets, filterPolymarketMarkets, enrichWithEffectivePrices, redeemPolyPosition } from "./polymarket.js";
+import { runPolyResolve } from "./poly-resolver.js";
 import type { TradeDecision, TradeExecution, Resolution, PositionSnapshot } from "./types.js";
 
 async function runPolyScan() {
@@ -202,7 +203,46 @@ async function runResolveCmd() {
   const config = loadConfig();
   logInfo("Checking unresolved bets...");
   await runResolve(config.manifoldApiKey);
+  await runPolyResolve();
   logInfo("Done.");
+}
+
+async function runPolyRedeem() {
+  const config = loadConfig();
+
+  if (!config.polyPrivateKey) {
+    logError("POLY_PRIVATE_KEY not set — cannot redeem on-chain");
+    process.exit(1);
+  }
+
+  const resolutions = readJsonl<Resolution>(RESOLUTIONS_FILE);
+  const wonPoly = resolutions.filter(r => r.venue === "polymarket" && r.won);
+
+  if (wonPoly.length === 0) {
+    logInfo("No won Polymarket positions to redeem.");
+    return;
+  }
+
+  // Deduplicate by conditionId — one redemption per market is enough
+  const unique = new Map<string, Resolution>();
+  for (const r of wonPoly) unique.set(r.marketId, r);
+
+  logInfo(`Redeeming ${unique.size} won Polymarket position(s)...`);
+  logInfo(`(Calling redeemPositions on CTF contract — requires MATIC for gas)\n`);
+
+  let ok = 0;
+  for (const res of unique.values()) {
+    const result = await redeemPolyPosition(config, res.marketId);
+    if ("error" in result) {
+      logError(`  Failed ${res.question.slice(0, 50)}: ${result.error}`);
+    } else {
+      logInfo(`  Redeemed: ${res.question.slice(0, 50)}`);
+      logInfo(`    tx: https://polygonscan.com/tx/${result.txHash}`);
+      ok++;
+    }
+  }
+
+  logInfo(`\nRedeemed: ${ok}/${unique.size}`);
 }
 
 function runStats() {
@@ -376,7 +416,13 @@ switch (command) {
       process.exit(1);
     });
     break;
+  case "redeem:poly":
+    runPolyRedeem().catch((err) => {
+      logError(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    });
+    break;
   default:
-    logError(`Unknown command: ${command}. Use: scan, resolve, sell, monitor, stats, poly:scan`);
+    logError(`Unknown command: ${command}. Use: scan, resolve, sell, monitor, stats, poly:scan, redeem:poly`);
     process.exit(1);
 }

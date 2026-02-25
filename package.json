@@ -12,7 +12,8 @@
     "stats": "tsx src/index.ts stats",
     "typecheck": "tsc --noEmit",
     "poly:scan": "tsx src/index.ts poly:scan",
-    "setup:poly": "tsx scripts/setup-polymarket.ts"
+    "setup:poly": "tsx scripts/setup-polymarket.ts",
+    "redeem:poly": "tsx src/index.ts redeem:poly"
   },
   "keywords": [],
   "author": "",
