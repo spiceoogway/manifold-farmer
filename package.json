@@ -11,6 +11,7 @@
     "monitor": "tsx src/index.ts monitor",
     "stats": "tsx src/index.ts stats",
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx/esm --test tests/*.test.ts",
     "poly:scan": "tsx src/index.ts poly:scan",
     "setup:poly": "tsx scripts/setup-polymarket.ts",
     "redeem:poly": "tsx src/index.ts redeem:poly",

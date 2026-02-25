@@ -41,13 +41,14 @@ Small bets on uncertain categories to gather data. Scale up only on categories w
 
 ## Implementation Phases
 
-### Phase 0: Production Hardening — ⚠️ Partial
+### Phase 0: Production Hardening — ✅ Done
 
 - ✅ Request timeouts on all fetch calls
 - ✅ CI/CD — GitHub Actions typecheck on PRs
-- ✗ Retry with exponential backoff on transient API errors
-- ✗ Shared P&L calculation module (currently duplicated across resolver/seller/snapshots)
-- ✗ Tests for core math (Kelly, calibration, effective fill price)
+- ✅ Retry with exponential backoff on transient API errors (`src/utils.ts withRetry`, applied to Manifold + Polymarket fetch calls)
+- ✅ Shared P&L calculation module (`src/pnl.ts` — `computeWon`, `computeRealizedPnl`, `computeUnrealizedPnl`, `computeMaxPayout`)
+- ✅ Tests for core math (`pnpm test` — 8 tests for P&L functions using Node built-in test runner)
+- ✅ Sell record persistence — seller now writes `action:"SELL"` records to trades.jsonl after executing; resolver and seller both exclude sold positions from open position lists
 
 ### Phase 1: Polymarket Direct Trading — ✅ Done
 

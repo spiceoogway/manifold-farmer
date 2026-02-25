@@ -2,6 +2,7 @@ import { ClobClient, Side, OrderType, Chain } from "@polymarket/clob-client";
 import type { ApiKeyCreds } from "@polymarket/clob-client";
 import { ethers, Wallet } from "ethers";
 import type { Config } from "./types.js";
+import { withRetry } from "./utils.js";
 
 // === Types ===
 
@@ -45,10 +46,10 @@ export async function fetchPolymarketMarkets(config: Config): Promise<Polymarket
   const timeout = setTimeout(() => controller.abort(), 15_000);
 
   try {
-    const res = await fetch(url, {
+    const res = await withRetry(() => fetch(url, {
       signal: controller.signal,
       headers: { "User-Agent": "manifold-farmer/1.0" },
-    });
+    }), 3, 1000);
 
     if (!res.ok) {
       throw new Error(`Gamma API error: ${res.status} ${res.statusText}`);
@@ -146,10 +147,10 @@ export async function fetchOrderBook(tokenId: string): Promise<OrderBookResponse
   const timeout = setTimeout(() => controller.abort(), 10_000);
 
   try {
-    const res = await fetch(url, {
+    const res = await withRetry(() => fetch(url, {
       signal: controller.signal,
       headers: { "User-Agent": "manifold-farmer/1.0" },
-    });
+    }), 2, 500);
     if (!res.ok) throw new Error(`CLOB book ${res.status}`);
     return await res.json() as OrderBookResponse;
   } finally {

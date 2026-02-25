@@ -2,15 +2,17 @@ import type { TradeDecision, TradeExecution, Resolution, PositionSnapshot } from
 import { readJsonl, DECISIONS_FILE, TRADES_FILE, RESOLUTIONS_FILE } from "./data.js";
 import { getMarket } from "./manifold.js";
 import { logResolution, logSnapshot, logInfo } from "./logger.js";
+import { computeWon, computeRealizedPnl } from "./pnl.js";
 
 export async function runResolve(apiKey: string): Promise<void> {
   const trades = readJsonl<TradeExecution>(TRADES_FILE);
   const decisions = readJsonl<TradeDecision>(DECISIONS_FILE);
   const existing = readJsonl<Resolution>(RESOLUTIONS_FILE);
 
-  // Only real executions (not dry-run, not errored)
+  // Only real bet executions (not dry-run, not errored, not already sold)
+  const soldTraceIds = new Set(trades.filter((t) => t.action === "SELL").map((t) => t.traceId));
   const realTrades = trades.filter(
-    (t) => !t.dryRun && t.result?.betId && !t.result.error
+    (t) => !t.dryRun && t.result?.betId && !t.result.error && !soldTraceIds.has(t.traceId)
   );
 
   const resolvedIds = new Set(existing.map((r) => r.traceId));
@@ -70,7 +72,7 @@ export async function runResolve(apiKey: string): Promise<void> {
             : market.resolutionProbability ?? 0.5;
 
       const won = computeWon(trade.direction, resolution, actual);
-      const pnl = computePnl(
+      const pnl = computeRealizedPnl(
         trade.direction,
         trade.amount,
         trade.marketProb,
@@ -118,53 +120,6 @@ export async function runResolve(apiKey: string): Promise<void> {
   await recordSnapshots(apiKey);
 }
 
-function computeWon(
-  direction: "YES" | "NO",
-  resolution: "YES" | "NO" | "MKT",
-  actual: number
-): boolean {
-  if (resolution === "MKT") {
-    return direction === "YES" ? actual > 0.5 : actual < 0.5;
-  }
-  return direction === resolution;
-}
-
-function computePnl(
-  direction: "YES" | "NO",
-  amount: number,
-  marketProb: number,
-  resolution: "YES" | "NO" | "MKT",
-  won: boolean,
-  shares?: number,
-  resolutionProbability?: number
-): number {
-  if (resolution === "MKT") {
-    const p = resolutionProbability ?? 0.5;
-    if (shares) {
-      // Exact: shares × resolution value − cost
-      return direction === "YES"
-        ? shares * p - amount
-        : shares * (1 - p) - amount;
-    }
-    // Fallback: approximate using market prob as fill price
-    return direction === "YES"
-      ? amount * (p - marketProb) / marketProb
-      : amount * (marketProb - p) / (1 - marketProb);
-  }
-
-  // Binary YES/NO resolution
-  if (shares) {
-    // Exact: won shares pay $1 each, lost shares pay $0
-    return won ? shares - amount : -amount;
-  }
-  // Fallback: approximate
-  if (direction === "YES") {
-    return won ? amount * (1 - marketProb) / marketProb : -amount;
-  } else {
-    return won ? amount * marketProb / (1 - marketProb) : -amount;
-  }
-}
-
 /**
  * Record a mid-market snapshot for every open position.
  * Gives us mark-to-market calibration data between entry and resolution.
@@ -174,8 +129,10 @@ async function recordSnapshots(apiKey: string): Promise<void> {
   const resolutions = readJsonl<Resolution>(RESOLUTIONS_FILE);
   const resolvedIds = new Set(resolutions.map((r) => r.traceId));
 
+  const soldIds = new Set(trades.filter((t) => t.action === "SELL").map((t) => t.traceId));
   const openTrades = trades.filter(
-    (t) => !t.dryRun && t.result?.betId && !t.result.error && !resolvedIds.has(t.traceId)
+    (t) => !t.dryRun && t.result?.betId && !t.result.error
+      && !resolvedIds.has(t.traceId) && !soldIds.has(t.traceId)
   );
 
   if (openTrades.length === 0) return;

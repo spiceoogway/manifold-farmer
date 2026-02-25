@@ -1,4 +1,4 @@
-import { readFileSync, mkdirSync, existsSync } from "fs";
+import { readFileSync, mkdirSync, existsSync, appendFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -26,4 +26,8 @@ export function readJsonl<T>(filePath: string): T[] {
     }
   }
   return results;
+}
+
+export function appendJsonl(filePath: string, record: unknown): void {
+  appendFileSync(filePath, JSON.stringify(record) + "\n", "utf-8");
 }

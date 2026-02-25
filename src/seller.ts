@@ -4,10 +4,11 @@
  */
 
 import type { Config, TradeExecution, ManifoldMarket } from "./types.js";
-import { readJsonl, TRADES_FILE, RESOLUTIONS_FILE } from "./data.js";
+import { readJsonl, appendJsonl, TRADES_FILE, RESOLUTIONS_FILE } from "./data.js";
 import { getMarket, sellShares } from "./manifold.js";
 import { logInfo, logError } from "./logger.js";
 import type { Resolution } from "./types.js";
+import { computeUnrealizedPnl, computeMaxPayout } from "./pnl.js";
 
 interface Position {
   traceId: string;
@@ -32,16 +33,19 @@ interface SellCandidate {
 }
 
 /**
- * Find open positions from trades.jsonl that haven't resolved yet.
+ * Find open positions from trades.jsonl that haven't resolved or been sold.
  */
 function getOpenPositions(apiKey: string): Position[] {
   const trades = readJsonl<TradeExecution>(TRADES_FILE);
   const resolutions = readJsonl<Resolution>(RESOLUTIONS_FILE);
   const resolvedTraceIds = new Set(resolutions.map((r) => r.traceId));
+  // Exclude positions we've already sold (action: "SELL" records share the same traceId)
+  const soldTraceIds = new Set(trades.filter((t) => t.action === "SELL").map((t) => t.traceId));
 
-  // Only real trades that haven't resolved
+  // Only real bet records that haven't resolved or been sold
   return trades
-    .filter((t) => !t.dryRun && !t.result?.error && !resolvedTraceIds.has(t.traceId))
+    .filter((t) => !t.dryRun && t.result?.betId && !t.result.error
+      && !resolvedTraceIds.has(t.traceId) && !soldTraceIds.has(t.traceId))
     .map((t) => ({
       traceId: t.traceId,
       marketId: t.marketId,
@@ -82,28 +86,19 @@ export async function runSell(config: Config): Promise<void> {
       const currentProb = market.probability;
 
       // Calculate unrealized P&L
-      let unrealizedPnl: number;
-      let maxPayout: number;
-
-      if (pos.shares) {
-        // Actual fill price: amount/shares per share
-        if (pos.direction === "YES") {
-          unrealizedPnl = pos.shares * currentProb - pos.amount;
-          maxPayout = pos.shares - pos.amount; // if market goes to 100%
-        } else {
-          unrealizedPnl = pos.shares * (1 - currentProb) - pos.amount;
-          maxPayout = pos.shares - pos.amount; // if market goes to 0%
-        }
-      } else {
-        // Fallback: approximate using market prob at bet time as fill price
-        if (pos.direction === "YES") {
-          unrealizedPnl = pos.amount * (currentProb - pos.entryProb) / pos.entryProb;
-          maxPayout = pos.amount * (1 - pos.entryProb) / pos.entryProb;
-        } else {
-          unrealizedPnl = pos.amount * (pos.entryProb - currentProb) / (1 - pos.entryProb);
-          maxPayout = pos.amount * pos.entryProb / (1 - pos.entryProb);
-        }
-      }
+      const unrealizedPnl = computeUnrealizedPnl(
+        pos.direction,
+        pos.amount,
+        pos.entryProb,
+        currentProb,
+        pos.shares,
+      );
+      const maxPayout = computeMaxPayout(
+        pos.direction,
+        pos.amount,
+        pos.entryProb,
+        pos.shares,
+      );
 
       const payoutRatio = maxPayout > 0 ? unrealizedPnl / maxPayout : 0;
 
@@ -178,6 +173,21 @@ export async function runSell(config: Config): Promise<void> {
       const pnlStr = c.unrealizedPnl >= 0 ? `+M$${c.unrealizedPnl.toFixed(1)}` : `M$${c.unrealizedPnl.toFixed(1)}`;
       logInfo(`  Sold ${c.position.direction} on ${c.position.question.slice(0, 50)} (${pnlStr}) — ${c.reason}`);
       sold++;
+      appendJsonl(TRADES_FILE, {
+        traceId: c.position.traceId,
+        timestamp: new Date().toISOString(),
+        marketId: c.position.marketId,
+        question: c.position.question,
+        action: "SELL" as const,
+        direction: c.position.direction,
+        entryProb: c.position.entryProb,
+        sellProb: c.currentProb,
+        amount: c.position.amount,
+        shares: c.position.shares,
+        proceeds: c.position.amount + c.unrealizedPnl,
+        realizedPnl: c.unrealizedPnl,
+        reason: c.reason,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logError(`  Failed to sell ${c.position.marketId}: ${msg}`);

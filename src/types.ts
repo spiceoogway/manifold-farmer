@@ -91,6 +91,7 @@ export interface TradeExecution {
   venue: "manifold" | "polymarket";
   polyTokenId?: string;
   shares?: number; // actual shares received (for fill-price calculation)
+  action?: "SELL"; // present on sell records written after position is closed
   result?: {
     betId?: string;
     orderId?: string;

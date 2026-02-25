@@ -1,4 +1,5 @@
 import type { ManifoldUser, ManifoldMarket, BetResponse } from "./types.js";
+import { withRetry } from "./utils.js";
 
 const BASE = "https://api.manifold.markets/v0";
 const FETCH_TIMEOUT_MS = 30_000;
@@ -33,10 +34,10 @@ async function manifoldGet<T>(
 
   let res: Response;
   try {
-    res = await fetch(url.toString(), {
+    res = await withRetry(() => fetch(url.toString(), {
       headers: { Authorization: `Key ${apiKey}` },
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
+    }), 3, 1000);
   } catch (err) {
     throw new Error(`Manifold API ${path}: network error: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -62,7 +63,7 @@ async function manifoldPost<T>(
 
   let res: Response;
   try {
-    res = await fetch(`${BASE}${path}`, {
+    res = await withRetry(() => fetch(`${BASE}${path}`, {
       method: "POST",
       headers: {
         Authorization: `Key ${apiKey}`,
@@ -70,7 +71,7 @@ async function manifoldPost<T>(
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
+    }), 3, 1000);
   } catch (err) {
     throw new Error(`Manifold API POST ${path}: network error: ${err instanceof Error ? err.message : String(err)}`);
   }
