@@ -17,7 +17,7 @@ const CONTRACTS = {
   collateral:      "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174", // USDC.e on Polygon
 };
 
-const POLYGON_RPC = "https://polygon-rpc.com";
+const POLYGON_RPC = "https://polygon-bor-rpc.publicnode.com";
 
 const ERC20_ABI = [
   "function balanceOf(address) view returns (uint256)",
@@ -68,7 +68,10 @@ async function main() {
       console.log(`${label}: already approved (${ethers.utils.formatUnits(allowance, decimals)} ${symbol})`);
     } else {
       console.log(`${label}: approving...`);
-      const tx = await usdc.approve(spender, ethers.constants.MaxUint256);
+      const tx = await usdc.approve(spender, ethers.constants.MaxUint256, {
+        maxPriorityFeePerGas: ethers.utils.parseUnits("30", "gwei"),
+        maxFeePerGas: ethers.utils.parseUnits("250", "gwei"),
+      });
       console.log(`  tx: https://polygonscan.com/tx/${tx.hash}`);
       await tx.wait();
       console.log(`  confirmed`);

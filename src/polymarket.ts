@@ -6,19 +6,19 @@ import type { Config } from "./types.js";
 // === Types ===
 
 interface PolymarketApiMarket {
-  condition_id: string;
-  question_id: string;
+  conditionId: string;
   question: string;
-  market_slug: string;
+  slug: string;
   outcomes: string;         // JSON: '["Yes","No"]'
   outcomePrices: string;    // JSON: '["0.65","0.35"]'
-  volume: string;
   volume24hr: number;
   liquidityNum: number;
   endDate: string;
   active: boolean;
   closed: boolean;
-  tokens: { token_id: string; outcome: string }[];
+  acceptingOrders: boolean;
+  enableOrderBook: boolean;
+  clobTokenIds: string;     // JSON: '["yesTokenId","noTokenId"]'
 }
 
 export interface PolymarketMarket {
@@ -58,6 +58,9 @@ export async function fetchPolymarketMarkets(config: Config): Promise<Polymarket
     const results: PolymarketMarket[] = [];
 
     for (const m of raw) {
+      // Must be actively accepting orders on the CLOB
+      if (!m.acceptingOrders || !m.enableOrderBook) continue;
+
       // Only binary markets
       let outcomes: string[];
       try {
@@ -79,30 +82,29 @@ export async function fetchPolymarketMarkets(config: Config): Promise<Polymarket
       const noPrice = parseFloat(prices[1]);
       if (isNaN(yesPrice) || isNaN(noPrice)) continue;
 
-      // Need token IDs for order placement
-      if (!m.tokens || m.tokens.length < 2) continue;
-      const yesToken = m.tokens.find(t => t.outcome === "Yes");
-      const noToken = m.tokens.find(t => t.outcome === "No");
-      if (!yesToken || !noToken) continue;
+      // Token IDs: clobTokenIds is a JSON string ["yesId", "noId"]
+      let tokenIds: string[];
+      try {
+        tokenIds = JSON.parse(m.clobTokenIds);
+      } catch {
+        continue;
+      }
+      if (tokenIds.length < 2) continue;
 
       // Filter by volume and liquidity
       if (m.volume24hr < config.polyMinVolume24hr) continue;
       if (m.liquidityNum < config.polyMinLiquidity) continue;
 
-      // Filter: endDate within 7 days
       const endDate = new Date(m.endDate);
-      if (isNaN(endDate.getTime())) continue;
-      const msUntilEnd = endDate.getTime() - Date.now();
-      if (msUntilEnd < 0 || msUntilEnd > 7 * 24 * 60 * 60 * 1000) continue;
 
       results.push({
-        conditionId: m.condition_id,
+        conditionId: m.conditionId,
         question: m.question,
-        slug: m.market_slug,
+        slug: m.slug,
         yesPrice,
         noPrice,
-        yesTokenId: yesToken.token_id,
-        noTokenId: noToken.token_id,
+        yesTokenId: tokenIds[0],
+        noTokenId: tokenIds[1],
         volume24hr: m.volume24hr,
         liquidity: m.liquidityNum,
         endDate,
@@ -120,7 +122,7 @@ export function filterPolymarketMarkets(
 ): PolymarketMarket[] {
   return markets
     .filter(m => m.yesPrice >= 0.05 && m.yesPrice <= 0.95)
-    .sort((a, b) => a.endDate.getTime() - b.endDate.getTime());
+    .sort((a, b) => b.volume24hr - a.volume24hr); // highest volume first
 }
 
 // === Orderbook & Slippage ===
@@ -296,7 +298,7 @@ export async function placePolyOrder(
 // === CTF Redemption ===
 
 // Polygon mainnet addresses — from @polymarket/clob-client config.js
-const POLYGON_RPC = "https://polygon-rpc.com";
+const POLYGON_RPC = "https://polygon-bor-rpc.publicnode.com";
 const CTF_ADDRESS    = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045";
 const USDC_ADDRESS   = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
 const NULL_PARENT    = "0x0000000000000000000000000000000000000000000000000000000000000000";

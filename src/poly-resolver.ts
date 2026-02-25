@@ -17,7 +17,7 @@ import { readJsonl, DECISIONS_FILE, TRADES_FILE, RESOLUTIONS_FILE } from "./data
 import { logInfo, logResolution } from "./logger.js";
 
 // Polygon mainnet — from @polymarket/clob-client config.js
-const POLYGON_RPC = "https://polygon-rpc.com";
+const POLYGON_RPC = "https://polygon-bor-rpc.publicnode.com";
 const CTF_ADDRESS = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045";
 
 const CTF_ABI = [

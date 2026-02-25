@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "poly:scan": "tsx src/index.ts poly:scan",
     "setup:poly": "tsx scripts/setup-polymarket.ts",
-    "redeem:poly": "tsx src/index.ts redeem:poly"
+    "redeem:poly": "tsx src/index.ts redeem:poly",
+    "swap:usdc": "tsx scripts/swap-usdc.ts"
   },
   "keywords": [],
   "author": "",
