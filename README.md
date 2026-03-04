@@ -1,4 +1,4 @@
-# manifold-farmer
+# polyedge
 
 Prediction market trading bot. Trades on [Polymarket](https://polymarket.com) (real USDC) and [Manifold Markets](https://manifold.markets) (play money). Uses Claude to estimate probabilities, Kelly criterion to size bets, and tracks calibration over time to improve.
 

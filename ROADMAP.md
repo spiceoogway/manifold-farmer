@@ -152,9 +152,9 @@ Strong on BTC/ETH daily price strikes ($691k vol) and economic data (Fed decisio
 
 Cron setup:
 ```bash
-*/90 * * * * cd ~/manifold-farmer && pnpm poly:scan >> /tmp/poly.log 2>&1
-0 * * * *   cd ~/manifold-farmer && pnpm monitor >> /tmp/monitor.log 2>&1
-0 */4 * * * cd ~/manifold-farmer && pnpm redeem:poly >> /tmp/redeem.log 2>&1
+*/90 * * * * cd ~/polyedge && pnpm poly:scan >> /tmp/poly.log 2>&1
+0 * * * *   cd ~/polyedge && pnpm monitor >> /tmp/monitor.log 2>&1
+0 */4 * * * cd ~/polyedge && pnpm redeem:poly >> /tmp/redeem.log 2>&1
 ```
 
 ### Phase 6: Intelligent Position Management — 🔲 Not Started

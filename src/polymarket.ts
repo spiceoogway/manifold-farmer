@@ -48,7 +48,7 @@ export async function fetchPolymarketMarkets(config: Config): Promise<Polymarket
   try {
     const res = await withRetry(() => fetch(url, {
       signal: controller.signal,
-      headers: { "User-Agent": "manifold-farmer/1.0" },
+      headers: { "User-Agent": "polyedge/1.0" },
     }), 3, 1000);
 
     if (!res.ok) {
@@ -149,7 +149,7 @@ export async function fetchOrderBook(tokenId: string): Promise<OrderBookResponse
   try {
     const res = await withRetry(() => fetch(url, {
       signal: controller.signal,
-      headers: { "User-Agent": "manifold-farmer/1.0" },
+      headers: { "User-Agent": "polyedge/1.0" },
     }), 2, 500);
     if (!res.ok) throw new Error(`CLOB book ${res.status}`);
     return await res.json() as OrderBookResponse;
@@ -359,7 +359,7 @@ export async function getPolyPositions(walletAddress: string): Promise<PolyPosit
   try {
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: { "User-Agent": "manifold-farmer/1.0" },
+      headers: { "User-Agent": "polyedge/1.0" },
     });
 
     if (!res.ok) return [];
